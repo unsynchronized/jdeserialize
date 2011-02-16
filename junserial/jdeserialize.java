@@ -19,12 +19,23 @@ import java.util.*;
  *     - # For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
  *     - error if both serializable & externalizable flags are set
  *     - test enum
+ *     - maybe filter out java.lang.Enum
+ *     - split up classes
  */
 
 public class jdeserialize {
+    public static final String INDENT = "    ";
+    public static final int CODEWIDTH = 90;
+
     private String filename;
     private Map<Integer,content> handles;
     private int curhandle;
+
+    public class ValidityException extends Exception {
+        public ValidityException(String msg) {
+            super(msg);
+        }
+    }
 
     public enum contenttype {
         INSTANCE, CLASS, ARRAY, STRING, ENUM, CLASSDESC, BLOCKDATA
@@ -32,6 +43,7 @@ public class jdeserialize {
     public interface content {
         public contenttype getType();
         public int getHandle();
+        public void validate() throws ValidityException;
     }
     public class enumobj extends contentbase {
         public classdesc classdesc;
@@ -132,6 +144,8 @@ public class jdeserialize {
         public int getHandle() {
             return this.handle;
         }
+        public void validate() throws ValidityException {
+        }
     }
     public class blockdata extends contentbase {
         public byte[] buf;
@@ -139,32 +153,41 @@ public class jdeserialize {
             super(contenttype.BLOCKDATA);
             this.buf = buf;
         }
+        public String toString() {
+            return "[blockdata " + hex(handle) + ": " + buf.length + " bytes]";
+        }
     }
     public class instance extends contentbase {
-        public Map<classdesc, List<Object>> fielddata;
+        public Map<classdesc, Map<field, Object>> fielddata;
         public Map<classdesc, List<content>> annotations;
         public classdesc classdesc;
         public instance() {
             super(contenttype.INSTANCE);
-            this.fielddata = new HashMap<classdesc, List<Object>>();
+            this.fielddata = new HashMap<classdesc, Map<field, Object>>();
             this.annotations = new HashMap<classdesc, List<content>>();
         }
         public String toString() {
             StringBuffer sb = new StringBuffer();
             sb.append("[instance " + hex(handle) + ": " + hex(classdesc.handle) + "/" + classdesc.name);
             if(fielddata != null && fielddata.size() > 0) {
-                sb.append("\nfield data:\n");
+                sb.append("\n  field data:\n");
                 for(classdesc cd: fielddata.keySet()) {
-                    sb.append("    ").append(cd.handle).append("/").append(cd.name).append(":\n");
-                    for(Object o: fielddata.get(cd)) {
+                    sb.append("    ").append(hex(cd.handle)).append("/").append(cd.name).append(":\n");
+                    for(field f: fielddata.get(cd).keySet()) {
+                        Object o = fielddata.get(cd).get(f);
+                        sb.append("        ").append(f.name).append(": ");
                         if(o instanceof content) {
                             content c = (content)o;
-                            debug("XXX this " + hex(this.handle) + " handle: " + hex(c.getHandle()));
-                        }
-                        if((o instanceof content) && o != null && ((content)o).getHandle() == this.handle) {
-                            sb.append("        this\n");
+                            int h = c.getHandle();
+                            if(h == this.handle) {
+                                sb.append("this");
+                            } else {
+                                sb.append("r" + hex(h));
+                            }
+                            sb.append(" XXX " + c.getClass().getName());
+                            sb.append("\n");
                         } else {
-                            sb.append("        " + o).append("\n");
+                            sb.append("" + o).append("\n");
                         }
                     }
                 }
@@ -176,42 +199,45 @@ public class jdeserialize {
             ArrayList<classdesc> classes = new ArrayList<classdesc>();
             classdesc.getHierarchy(classes);
             debug("XXXhierarchy: " + classes.size() + " cd: " + classdesc.toString());
-            Map<classdesc, List<Object>> alldata = new HashMap<classdesc, List<Object>>();
+            Map<classdesc, Map<field, Object>> alldata = new HashMap<classdesc, Map<field, Object>>();
             Map<classdesc, List<content>> ann = new HashMap<classdesc, List<content>>();
             for(classdesc cd: classes) {
-                ArrayList<Object> values = new ArrayList<Object>();
+                Map<field, Object> values = new HashMap<field, Object>();
                 if((cd.descflags & ObjectStreamConstants.SC_SERIALIZABLE) != 0) {
+                    if((cd.descflags & ObjectStreamConstants.SC_EXTERNALIZABLE) != 0) {
+                        throw new IOException("SC_EXTERNALIZABLE & SC_SERIALIZABLE encountered");
+                    }
                     for(field f: cd.fields) {
-                        debug("XXX reading field type: " + f.type.toString());
+                        //debug("XXX reading field type: " + f.type.toString());
                         switch(f.type) {
                             case BYTE:
-                                values.add(Byte.valueOf(dis.readByte()));
+                                values.put(f, Byte.valueOf(dis.readByte()));
                                 break;
                             case CHAR:
-                                values.add(Character.valueOf(dis.readChar()));
+                                values.put(f, Character.valueOf(dis.readChar()));
                                 break;
                             case DOUBLE:
-                                values.add(Double.valueOf(dis.readDouble()));
+                                values.put(f, Double.valueOf(dis.readDouble()));
                                 break;
                             case FLOAT:
-                                values.add(Float.valueOf(dis.readFloat()));
+                                values.put(f, Float.valueOf(dis.readFloat()));
                                 break;
                             case INTEGER:
-                                values.add(Integer.valueOf(dis.readInt()));
+                                values.put(f, Integer.valueOf(dis.readInt()));
                                 break;
                             case LONG:
-                                values.add(Long.valueOf(dis.readLong()));
+                                values.put(f, Long.valueOf(dis.readLong()));
                                 break;
                             case SHORT:
-                                values.add(Short.valueOf(dis.readShort()));
+                                values.put(f, Short.valueOf(dis.readShort()));
                                 break;
                             case BOOLEAN:
-                                values.add(Boolean.valueOf(dis.readBoolean()));
+                                values.put(f, Boolean.valueOf(dis.readBoolean()));
                                 break;
                             case OBJECT:
                                 byte stc = dis.readByte();
                                 content c = read_Content(stc, dis, false);
-                                values.add(c);
+                                values.put(f, c);
                                 break;
                                 //stringobj classname = read_newString(stc, dis);
                                 //debug("stc " + hex(stc) + " stringobj " + classname.value);
@@ -221,13 +247,19 @@ public class jdeserialize {
 
                         }
                         alldata.put(cd, values);
-                        debug("XXX done reading field type: " + f.type.toString());
+                        //debug("XXX done reading field type: " + f.type.toString());
                     }
-                    // XXX XXX XXX XXX: handle SC_ENUM
+                    // XXX XXX XXX XXX: handle SC_ENUM more?
                     if((cd.descflags & ObjectStreamConstants.SC_WRITE_METHOD) != 0) {
+                        if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
+                            throw new IOException("SC_ENUM & SC_WRITE_METHOD encountered!");
+                        }
                         ann.put(cd, read_classAnnotation(dis));
                     }
                 } else if((cd.descflags & ObjectStreamConstants.SC_EXTERNALIZABLE) != 0) {
+                    if((cd.descflags & ObjectStreamConstants.SC_SERIALIZABLE) != 0) {
+                        throw new IOException("SC_SERIALIZABLE & SC_EXTERNALIZABLE encountered");
+                    }
                     if((cd.descflags & ObjectStreamConstants.SC_BLOCK_DATA) != 0) {
                         throw new EOFException("hit externalizable with nonzero SC_BLOCK_DATA; can't interpret data");
                         // XXX: print out the offset, class descriptor
@@ -318,6 +350,52 @@ public class jdeserialize {
         }
     }
 
+    public void dump_ClassDesc(classdesc cd, PrintStream ps) {
+        if(cd.classtype == classdesctype.NORMALCLASS) {
+            if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
+                ps.print("enum " + cd.name + " {");
+                boolean shouldindent = true;
+                int len = INDENT.length();
+                for(String econst: cd.enumconstants) {
+                    if(shouldindent) {
+                        ps.println("");
+                        ps.print(INDENT);
+                        shouldindent = false;
+                    }
+                    len += econst.length();
+                    ps.print(econst + ", ");
+                    if(len >= CODEWIDTH) {
+                        len = INDENT.length();
+                        shouldindent = true;
+                    }
+                }
+                ps.println("");
+                ps.println("}");
+                return;
+            } 
+            ps.print("class " + cd.name);
+            if(cd.superclass != null) {
+                ps.print(" extends " + cd.superclass.name);
+            }
+            ps.print(" implements ");
+            if((cd.descflags & ObjectStreamConstants.SC_EXTERNALIZABLE) != 0) {
+                ps.println("java.io.Externalizable");
+            } else {
+                ps.println("java.io.Serializable");
+            }
+            if(cd.interfaces != null) {
+                for(String intf: cd.interfaces) {
+                    ps.print(", " + intf);
+                }
+            }
+            ps.println(" {");
+            ps.println("}");
+        } else {
+            System.out.println("XXX: invalid classdesc type");
+            System.exit(1);
+        }
+    }
+
     // note: this covers both normal and proxy class descriptors; check type!
     public enum classdesctype {
         NORMALCLASS, PROXYCLASS
@@ -331,10 +409,15 @@ public class jdeserialize {
         public List annotations;
         public classdesc superclass;
         public String[] interfaces;
+        public Set<String> enumconstants;
 
         public classdesc(classdesctype classtype) {
             super(contenttype.CLASSDESC);
             this.classtype = classtype;
+            this.enumconstants = new HashSet<String>();
+        }
+        public void addEnum(String constval) {
+            this.enumconstants.add(constval);
         }
         public String toString() {
             StringBuffer sb = new StringBuffer();
@@ -352,6 +435,19 @@ public class jdeserialize {
                 }
             } 
             classes.add(this);
+        }
+        public void validate() throws ValidityException {
+            if((descflags & ObjectStreamConstants.SC_ENUM) != 0) {
+                // we're an enum; shouldn't have any fields/superinterfaces
+                if(fields != null || interfaces != null) {
+                    throw new ValidityException("enums shouldn't implement interfaces or have non-constant fields!");
+                }
+            } else {
+                // non-enums shouldn't have enum constant fields.  
+                if(enumconstants != null && enumconstants.size() > 0) {
+                    throw new ValidityException("non-enum classes shouldn't have enum constants!");
+                }
+            }
         }
     }
     public void setHandle(int handle, content c) throws IOException {
@@ -417,11 +513,9 @@ public class jdeserialize {
                     fields[s] = new field(fieldtype.get(ftype), fieldname);
                 } else if(ftype == '[' || ftype == 'L') {
                     String fieldname = dis.readUTF();
-                    debug("XXXfieldname " + fieldname);
                     byte stc = dis.readByte();
                     stringobj classname = read_newString(stc, dis);
                     //String classname = dis.readUTF();
-                    debug("XXXclassname " + classname);
                     fields[s] = new field(fieldtype.get(ftype), fieldname, classname);
                 } else {
                     throw new IOException("invalid field type char: " + hex(ftype));
@@ -490,10 +584,14 @@ public class jdeserialize {
     }
     public enumobj read_newEnum(DataInputStream dis) throws IOException {
         classdesc cd = read_newClassDesc(dis);
+        if(cd == null) {
+            throw new IOException("enum classdesc can't be null!");
+        }
         int handle = newHandle();
         debug("reading new enum: handle " + hex(handle) + " classdesc " + cd.toString());
         byte tc = dis.readByte();
         stringobj so = read_newString(tc, dis);
+        cd.addEnum(so.value);
         setHandle(handle, so);
         return new enumobj(handle, cd, so);
     }
@@ -628,6 +726,15 @@ public class jdeserialize {
         debug("XXX done reading.  content:");
         for(content c: content) {
             debug("" + c);
+        }
+
+        debug("");
+        debug("XXXX classes:");
+        for(content c: handles.values()) {
+            if(c instanceof classdesc) {
+                dump_ClassDesc((classdesc)c, System.out);
+                debug("");
+            }
         }
     }
 
