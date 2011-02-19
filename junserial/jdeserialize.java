@@ -124,12 +124,40 @@ public class jdeserialize {
             return "[class " + hex(handle) + ": " + classdesc.toString() + "]";
         }
     }
+    public class arraycoll extends ArrayList<Object> {
+        private fieldtype ftype;
+        public arraycoll(fieldtype ft) {
+            super();
+            this.ftype = ft;
+        }
+        public String toString() {
+            StringBuffer sb = new StringBuffer();
+            sb.append("[arraycoll sz ").append(this.size());
+            boolean first = true;
+            for(Object o: this) {
+                if(first) {
+                    first = false;
+                    sb.append(' ');
+                } else {
+                    sb.append(", ");
+                }
+                sb.append(o.toString());
+            }
+            return sb.toString();
+        }
+    }
     public class arrayobj extends contentbase {
         public classdesc classdesc;
-        public arrayobj(int handle, classdesc cd) {
+        public arraycoll data;
+        public arrayobj(int handle, classdesc cd, arraycoll data) {
             super(contenttype.ARRAY);
             this.handle = handle;
             this.classdesc = cd;
+            this.data = data;
+        }
+        public String toString() {
+            return "[array " + hex(handle) + " cd " + classdesc.toString() + ": " 
+                + data.toString() + "]";
         }
     }
     public class contentbase implements content {
@@ -209,46 +237,10 @@ public class jdeserialize {
                     }
                     for(field f: cd.fields) {
                         //debug("XXX reading field type: " + f.type.toString());
-                        switch(f.type) {
-                            case BYTE:
-                                values.put(f, Byte.valueOf(dis.readByte()));
-                                break;
-                            case CHAR:
-                                values.put(f, Character.valueOf(dis.readChar()));
-                                break;
-                            case DOUBLE:
-                                values.put(f, Double.valueOf(dis.readDouble()));
-                                break;
-                            case FLOAT:
-                                values.put(f, Float.valueOf(dis.readFloat()));
-                                break;
-                            case INTEGER:
-                                values.put(f, Integer.valueOf(dis.readInt()));
-                                break;
-                            case LONG:
-                                values.put(f, Long.valueOf(dis.readLong()));
-                                break;
-                            case SHORT:
-                                values.put(f, Short.valueOf(dis.readShort()));
-                                break;
-                            case BOOLEAN:
-                                values.put(f, Boolean.valueOf(dis.readBoolean()));
-                                break;
-                            case OBJECT:
-                                byte stc = dis.readByte();
-                                content c = read_Content(stc, dis, false);
-                                values.put(f, c);
-                                break;
-                                //stringobj classname = read_newString(stc, dis);
-                                //debug("stc " + hex(stc) + " stringobj " + classname.value);
-                                //throw new IOException("object of class name: " + f.classname.value);
-                            default:
-                                throw new IOException("can't process type: " + f.type.toString());
-
-                        }
-                        alldata.put(cd, values);
-                        //debug("XXX done reading field type: " + f.type.toString());
+                        Object o = read_FieldValue(f.type, dis);
+                        values.put(f, o);
                     }
+                    alldata.put(cd, values);
                     // XXX XXX XXX XXX: handle SC_ENUM more?
                     if((cd.descflags & ObjectStreamConstants.SC_WRITE_METHOD) != 0) {
                         if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
@@ -272,23 +264,63 @@ public class jdeserialize {
             this.annotations = annotations;
         }
     }
+
+    public Object read_FieldValue(fieldtype f, DataInputStream dis) throws IOException {
+        switch(f) {
+            case BYTE:
+                return Byte.valueOf(dis.readByte());
+            case CHAR:
+                return Character.valueOf(dis.readChar());
+            case DOUBLE:
+                return Double.valueOf(dis.readDouble());
+            case FLOAT:
+                return Float.valueOf(dis.readFloat());
+            case INTEGER:
+                return Integer.valueOf(dis.readInt());
+            case LONG:
+                return Long.valueOf(dis.readLong());
+            case SHORT:
+                return Short.valueOf(dis.readShort());
+            case BOOLEAN:
+                return Boolean.valueOf(dis.readBoolean());
+            case OBJECT:
+            case ARRAY:
+                byte stc = dis.readByte();
+                if(f == fieldtype.ARRAY && stc != ObjectStreamConstants.TC_ARRAY) {
+                    throw new IOException("array type listed, but typecode is not TC_ARRAY: " + hex(stc));
+                }
+                content c = read_Content(stc, dis, false);
+                return c;
+            default:
+                throw new IOException("can't process type: " + f.toString());
+        }
+    }
     public jdeserialize(String filename) {
         this.filename = filename;
     }
     public enum fieldtype {
-        BYTE ('B'),
-        CHAR ('C'),
-        DOUBLE ('D'), 
-        FLOAT ('F'),
-        INTEGER ('I'),
-        LONG ('J'),
-        SHORT ('S'),
-        BOOLEAN ('Z'),
+        BYTE ('B', "byte"),
+        CHAR ('C', "char"),
+        DOUBLE ('D', "double"), 
+        FLOAT ('F', "float"),
+        INTEGER ('I', "int"),
+        LONG ('J', "long"),
+        SHORT ('S', "String"),
+        BOOLEAN ('Z', "boolean"),
         ARRAY ('['),
         OBJECT ('L');
         private final char ch;
+        private final String javatype;
         fieldtype(char ch) {
             this.ch = ch;
+            this.javatype = null;
+        }
+        fieldtype(char ch, String javatype) {
+            this.ch = ch;
+            this.javatype = javatype;
+        }
+        public String getJavaType() {
+            return this.javatype;
         }
         public char ch() { return ch; }
         public static fieldtype get(byte b) throws IOException {
@@ -379,9 +411,9 @@ public class jdeserialize {
             }
             ps.print(" implements ");
             if((cd.descflags & ObjectStreamConstants.SC_EXTERNALIZABLE) != 0) {
-                ps.println("java.io.Externalizable");
+                ps.print("java.io.Externalizable");
             } else {
-                ps.println("java.io.Serializable");
+                ps.print("java.io.Serializable");
             }
             if(cd.interfaces != null) {
                 for(String intf: cd.interfaces) {
@@ -389,6 +421,17 @@ public class jdeserialize {
                 }
             }
             ps.println(" {");
+            for(field f: cd.fields) {
+                ps.print("    ");
+                if(f.type == fieldtype.OBJECT) {
+                    ps.print(f.classname.value); 
+                } else if(f.type == fieldtype.ARRAY) {
+                    ps.print(f.classname.value + "[]");
+                } else {
+                    ps.print(f.type.getJavaType());
+                }
+                ps.println(" " + f.name + ";");
+            }
             ps.println("}");
         } else {
             System.out.println("XXX: invalid classdesc type");
@@ -568,11 +611,28 @@ public class jdeserialize {
         classdesc cd = read_newClassDesc(dis);
         int handle = newHandle();       // XXX set
         debug("reading new array: handle " + hex(handle) + " classdesc " + cd.toString());
+        if(cd.name.length() < 2) {
+            throw new IOException("invalid name in array classdesc: " + cd.name);
+        }
+        arraycoll ac = read_arrayValues(cd.name.substring(1), dis);
+        return new arrayobj(handle, cd, ac);
+    }
+    public arraycoll read_arrayValues(String str, DataInputStream dis) throws IOException {
+        byte b = str.getBytes("UTF-8")[0];      // XXX: redecoding sucks.
+        fieldtype ft = fieldtype.get(b);
         int size = dis.readInt();
         if(size < 0) {
             throw new IOException("invalid array size: " + size);
         }
-        throw new IOException("XXX");
+        debug("XXX array size: " + size);
+
+        arraycoll ac = new arraycoll(ft);
+        for(int i = 0; i < size; i++) {
+            ac.add(read_FieldValue(ft, dis));
+            continue;
+        }
+        debug("XXX: read array values " + ac.toString());
+        return ac;
     }
     public classobj read_newClass(DataInputStream dis) throws IOException {
         classdesc cd = read_newClassDesc(dis);
