@@ -1,5 +1,6 @@
 import java.io.*;
 import java.util.*;
+import java.util.regex.*;
 
 /*
  *
@@ -9,17 +10,22 @@ import java.util.*;
  *       http://download.oracle.com/javase/6/docs/platform/serialization/spec/protocol.html
  *     - "Modified UTF-8 Strings" within the JNI specification: 
  *       http://download.oracle.com/javase/1.5.0/docs/guide/jni/spec/types.html#wp16542
- *
+ *     - "Inner Classes Specification" within the JDK 1.1.8 docs:
+ *       http://java.sun.com/products/archive/jdk/1.1/
  *
  *
  * XXX TODO: 
+ *     - test non-null package names
  *     - handle Class, ObjectStreamClass cases (2.1)
  *     - text proxy/dynamic proxy classes, plus annotations (2.1)
  *     - test old jdk (particularly with old String instances)
  *     - # For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
  *     - error if both serializable & externalizable flags are set
- *     - test enum
- *     - maybe filter out java.lang.Enum
+ *     - options
+ *         - filter java.lang.* classes (on)
+ *         - filter array classes (on)
+ *         - handle inner classes according to inner classes spec rules (on)
+ *     - fixup local/anonymous classes (but how?)
  *     - split up classes
  */
 
@@ -31,10 +37,18 @@ public class jdeserialize {
     private Map<Integer,content> handles;
     private int curhandle;
 
-    public class ValidityException extends Exception {
+    public static class ValidityException extends IOException {
         public ValidityException(String msg) {
             super(msg);
         }
+    }
+
+    public static String indent(int level) {
+        StringBuffer sb = new StringBuffer("");
+        for(int i = 0; i < level; i++) {
+            sb.append(INDENT);
+        }
+        return sb.toString();
     }
 
     public enum contenttype {
@@ -196,31 +210,7 @@ public class jdeserialize {
         }
         public String toString() {
             StringBuffer sb = new StringBuffer();
-            sb.append("[instance " + hex(handle) + ": " + hex(classdesc.handle) + "/" + classdesc.name);
-            if(fielddata != null && fielddata.size() > 0) {
-                sb.append("\n  field data:\n");
-                for(classdesc cd: fielddata.keySet()) {
-                    sb.append("    ").append(hex(cd.handle)).append("/").append(cd.name).append(":\n");
-                    for(field f: fielddata.get(cd).keySet()) {
-                        Object o = fielddata.get(cd).get(f);
-                        sb.append("        ").append(f.name).append(": ");
-                        if(o instanceof content) {
-                            content c = (content)o;
-                            int h = c.getHandle();
-                            if(h == this.handle) {
-                                sb.append("this");
-                            } else {
-                                sb.append("r" + hex(h));
-                            }
-                            sb.append(" XXX " + c.getClass().getName());
-                            sb.append("\n");
-                        } else {
-                            sb.append("" + o).append("\n");
-                        }
-                    }
-                }
-            }
-            sb.append("]");
+            sb.append("[instance " + hex(handle) + ": " + hex(classdesc.handle) + "/" + classdesc.name).append("]");
             return sb.toString();
         }
         public void readClassdata(DataInputStream dis) throws IOException {
@@ -358,15 +348,86 @@ public class jdeserialize {
         public fieldtype type;
         public String name; 
         public stringobj classname; 
-        public field(fieldtype type, String name, stringobj classname) {
+        public boolean isInnerClassReference = false;
+        public field(fieldtype type, String name, stringobj classname) throws ValidityException {
             this.type = type;
             this.name = name;
             this.classname = classname;
+            if(classname != null) {
+                validate(classname.value);
+            }
         }
-        public field(fieldtype type, String name) {
+        public field(fieldtype type, String name) throws ValidityException {
             this(type, name, null);
         }
+        /**
+         * Get a string representing the type for this field in Java (the language)
+         * format.
+         * @returns a string representing the fully-qualified type of the field
+         * @throws IOException if a validity or I/O error occurs
+         */
+        public String getJavaType() throws IOException {
+            return resolveJavaType(this.type, this.classname == null ? null : this.classname.value, true);
+        }
+        /**
+         * Changes the name of an object reference to the name specified.  This is used by
+         * the inner-class-connection code to fix up field references.
+         * @param newname the fully-qualified class 
+         * @throws ValidityException if the field isn't a reference type, or another
+         * validity error occurs
+         */
+        public void setReferenceTypeName(String newname) throws ValidityException {
+            if(this.type != fieldtype.OBJECT) {
+                throw new ValidityException("can't fix up a non-reference field!");
+            }
+            String nname = "L" + newname.replace('.', '/') + ";";
+            this.classname.value = nname;
+        }
+        public void validate(String jt) throws ValidityException {
+            if(this.type == fieldtype.OBJECT) {
+                if(jt == null) {
+                    throw new ValidityException("classname can't be null");
+                }
+                if(jt.charAt(0) != 'L') {
+                    throw new ValidityException("invalid object field type descriptor: " + classname.value);
+                }
+                int end = jt.indexOf(';');
+                if(end == -1 || end != (jt.length()-1)) {
+                    throw new ValidityException("invalid object field type descriptor (must end with semicolon): " + classname.value);
+                }
+            }
+        }
     }
+    public String resolveJavaType(fieldtype type, String classname, boolean convertSlashes)  throws IOException {
+        if(type == fieldtype.ARRAY) {
+            StringBuffer asb = new StringBuffer("");
+            for(int i = 0; i < classname.length(); i++) {
+                char ch = classname.charAt(i);
+                switch(ch) {
+                    case '[':
+                        asb.append("[]");
+                        continue;
+                    case 'L':
+                        return decodeClassName(classname.substring(i), convertSlashes) + asb.toString();
+                    default:
+                        if(ch < 1 || ch > 127) {
+                            throw new ValidityException("invalid array field type descriptor character: " + classname);
+                        }
+                        fieldtype ft = fieldtype.get((byte)ch);
+                        if(i != (classname.length()-1)) {
+                            throw new ValidityException("array field type descriptor is too long: " + classname);
+                        }
+                        return ft.getJavaType() + asb.toString();
+                }
+            }
+            throw new ValidityException("array field type descriptor is too short: " + classname);
+        } else if(type == fieldtype.OBJECT) {
+            return decodeClassName(classname, convertSlashes);
+        } else {
+            return type.javatype;
+        }
+    }
+
     public List<content> read_classAnnotation(DataInputStream dis) throws IOException {
         List<content> list = new ArrayList<content>();
         while(true) {
@@ -381,31 +442,64 @@ public class jdeserialize {
             list.add(read_Content(tc, dis, true));
         }
     }
+    public void dump_Instance(int indentlevel, instance inst, PrintStream ps) {
+        StringBuffer sb = new StringBuffer();
+        sb.append("[instance " + hex(inst.handle) + ": " + hex(inst.classdesc.handle) + "/" + inst.classdesc.name);
+        if(inst.fielddata != null && inst.fielddata.size() > 0) {
+            sb.append("\n  field data:\n");
+            for(classdesc cd: inst.fielddata.keySet()) {
+                sb.append("    ").append(hex(cd.handle)).append("/").append(cd.name).append(":\n");
+                for(field f: inst.fielddata.get(cd).keySet()) {
+                    Object o = inst.fielddata.get(cd).get(f);
+                    sb.append("        ").append(f.name).append(": ");
+                    if(o instanceof content) {
+                        content c = (content)o;
+                        int h = c.getHandle();
+                        if(h == inst.handle) {
+                            sb.append("this");
+                        } else {
+                            sb.append("r" + hex(h));
+                        }
+                        sb.append(": ").append(c.toString());
+                        sb.append("\n");
+                    } else {
+                        sb.append("" + o).append("\n");
+                    }
+                }
+            }
+        }
+        sb.append("]");
+        ps.println(sb);
+    }
 
-    public void dump_ClassDesc(classdesc cd, PrintStream ps) {
+    public void dump_ClassDesc(int indentlevel, classdesc cd, PrintStream ps) throws IOException {
         if(cd.classtype == classdesctype.NORMALCLASS) {
             if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
-                ps.print("enum " + cd.name + " {");
+                ps.print(indent(indentlevel) + "enum " + cd.name + " {");
                 boolean shouldindent = true;
-                int len = INDENT.length();
+                int len = indent(indentlevel+1).length();
                 for(String econst: cd.enumconstants) {
                     if(shouldindent) {
                         ps.println("");
-                        ps.print(INDENT);
+                        ps.print(indent(indentlevel+1));
                         shouldindent = false;
                     }
                     len += econst.length();
                     ps.print(econst + ", ");
                     if(len >= CODEWIDTH) {
-                        len = INDENT.length();
+                        len = indent(indentlevel+1).length();
                         shouldindent = true;
                     }
                 }
                 ps.println("");
-                ps.println("}");
+                ps.println(indent(indentlevel) + "}");
                 return;
             } 
-            ps.print("class " + cd.name);
+            ps.print(indent(indentlevel));
+            if(cd.isStaticMemberClass) {
+                ps.print("static ");
+            }
+            ps.print("class " + (cd.name.charAt(0) == '[' ? resolveJavaType(fieldtype.ARRAY, cd.name, false) : cd.name));
             if(cd.superclass != null) {
                 ps.print(" extends " + cd.superclass.name);
             }
@@ -422,17 +516,16 @@ public class jdeserialize {
             }
             ps.println(" {");
             for(field f: cd.fields) {
-                ps.print("    ");
-                if(f.type == fieldtype.OBJECT) {
-                    ps.print(f.classname.value); 
-                } else if(f.type == fieldtype.ARRAY) {
-                    ps.print(f.classname.value + "[]");
-                } else {
-                    ps.print(f.type.getJavaType());
+                if(f.isInnerClassReference) {
+                    continue;
                 }
+                ps.print(indent(indentlevel+1) + f.getJavaType());
                 ps.println(" " + f.name + ";");
             }
-            ps.println("}");
+            for(classdesc icd: cd.innerclasses) {
+                dump_ClassDesc(indentlevel+1, icd, ps);
+            }
+            ps.println(indent(indentlevel)+"}");
         } else {
             System.out.println("XXX: invalid classdesc type");
             System.exit(1);
@@ -449,18 +542,36 @@ public class jdeserialize {
         public long serialVersionUID;
         public byte descflags;
         public field[] fields;
+        public List<classdesc> innerclasses;
         public List annotations;
         public classdesc superclass;
         public String[] interfaces;
         public Set<String> enumconstants;
+        public boolean isInnerClass = false;
+        public boolean isStaticMemberClass = false;
 
         public classdesc(classdesctype classtype) {
             super(contenttype.CLASSDESC);
             this.classtype = classtype;
             this.enumconstants = new HashSet<String>();
+            this.innerclasses = new ArrayList<classdesc>();
+        }
+        public void addInnerClass(classdesc cd) {
+            innerclasses.add(cd);
         }
         public void addEnum(String constval) {
             this.enumconstants.add(constval);
+        }
+        /**
+         * Determines whether this is an array type. 
+         * @returns true if this is an array type.
+         */
+        public boolean isArrayClass() {
+            if(name != null && name.length() > 1 && name.charAt(0) == '[') {
+                return true;
+            } else {
+                return false;
+            }
         }
         public String toString() {
             StringBuffer sb = new StringBuffer();
@@ -783,6 +894,7 @@ public class jdeserialize {
             content.add(read_Content(tc, dis, true));
         }
         debug("");
+        connectMemberClasses();
         debug("XXX done reading.  content:");
         for(content c: content) {
             debug("" + c);
@@ -792,10 +904,146 @@ public class jdeserialize {
         debug("XXXX classes:");
         for(content c: handles.values()) {
             if(c instanceof classdesc) {
-                dump_ClassDesc((classdesc)c, System.out);
-                debug("");
+                classdesc cl = (classdesc)c;
+                // XXX: make this an option
+                if(!cl.isStaticMemberClass && !cl.isInnerClass && (!cl.isArrayClass() || cl.isArrayClass())) {
+                    dump_ClassDesc(0, cl, System.out);
+                    debug("");
+                }
             }
         }
+        debug("XXXX instances:");
+        for(content c: handles.values()) {
+            if(c instanceof instance) {
+                instance i = (instance)c;
+                dump_Instance(0, i, System.out);
+            }
+        }
+    }
+
+    /**
+     * Connect member classes according to the rules specified by the JDK 1.1 Inner
+     * Classes Specification.  
+     *
+     * Inner classes:
+     * for each class C containing an object reference member R named this$N, do:
+     *     if the name of C matches the pattern O$I
+     *     AND the name O matches the name of an existing type T
+     *     AND T is the exact type referred to by R, then:
+     *         don't display the declaration of R in normal dumping,
+     *         consider C to be an inner class of O named I
+     *
+     * Static member classes (after):
+     * for each class C matching the pattern O$I, 
+     * where O is the name of a class in the same package
+     * AND C is not an inner class according to the above algorithm:
+     *     consider C to be an inner class of O named I
+     *
+     * This functions fills in the isInnerClass value in classdesc, the
+     * isInnerClassReference value in field, and the isStaticMemberClass value in
+     * classdesc where necessary.
+     *
+     * @throws ValidityException if the found values don't correspond to spec
+     */
+    public void connectMemberClasses() throws IOException {
+        HashMap<classdesc, String> newnames = new HashMap<classdesc, String>();
+        HashMap<String, classdesc> classes = new HashMap<String, classdesc>();
+        HashSet<String> classnames = new HashSet<String>();
+        for(content c: handles.values()) {
+            if(!(c instanceof classdesc)) {
+                continue;
+            }
+            classdesc cd = (classdesc)c;
+            classes.put(cd.name, cd);
+            classnames.add(cd.name);
+        }
+        Pattern fpat = Pattern.compile("^this\\$(\\d+)$");
+        Pattern clpat = Pattern.compile("^((?:[^\\$]+\\$)*[^\\$]+)\\$([^\\$]+)$");
+        for(classdesc cd: classes.values()) {
+            for(field f: cd.fields) {
+                if(f.type != fieldtype.OBJECT) {
+                    continue;
+                }
+                Matcher m = fpat.matcher(f.name);
+                if(!m.matches()) {
+                    continue;
+                }
+                Matcher clmat = clpat.matcher(cd.name);
+                if(!clmat.matches()) {
+                    throw new ValidityException("inner class enclosing-class reference field exists, but class name doesn't match expected pattern: class " + cd.name + " field " + f.name);
+                }
+                String outer = clmat.group(1), inner = clmat.group(2);
+                classdesc outercd = classes.get(outer);
+                if(outercd == null) {
+                    throw new ValidityException("couldn't connect inner classes: outer class not found for field name " + f.name);
+                }
+                if(!outercd.name.equals(f.getJavaType())) {
+                    throw new ValidityException("outer class field type doesn't match field type name: " + f.classname.value + " outer class name " + outercd.name);
+                }
+                outercd.addInnerClass(cd);
+                cd.isInnerClass = true;
+                f.isInnerClassReference = true;
+                newnames.put(cd, inner);
+            }
+        }
+        for(classdesc cd: classes.values()) {
+            if(cd.isInnerClass) {
+                continue;
+            }
+            Matcher clmat = clpat.matcher(cd.name);
+            if(!clmat.matches()) {
+                continue;
+            }
+            String outer = clmat.group(1), inner = clmat.group(2);
+            classdesc outercd = classes.get(outer);
+            if(outercd == null) {
+                throw new ValidityException("couldn't connect static member class: outer class not found for class name " + cd.name);
+            }
+            outercd.addInnerClass(cd);
+            cd.isStaticMemberClass = true;
+            newnames.put(cd, inner);
+        }
+        for(classdesc ncd: newnames.keySet()) {
+            String newname = newnames.get(ncd);
+            if(classnames.contains(newname)) {
+                throw new ValidityException("can't rename class from " + ncd.name + " to " + newname + " -- class already exists!");
+            }
+            for(classdesc cd: classes.values()) {
+                for(field f: cd.fields) {
+                    if(f.getJavaType().equals(ncd.name)) {
+                        System.out.println("XXX FIX FIELD: " + f.name + " from " + ncd.name + " to " + newname);
+                        f.setReferenceTypeName(newname);
+                    }
+                }
+            }
+            if(classnames.remove(ncd.name) == false) {
+                throw new ValidityException("tried to remove " + ncd.name + " from classnames cache, but couldn't find it!");
+            }
+            ncd.name = newname;
+            if(classnames.add(newname) == false) {
+                throw new ValidityException("can't rename class to " + newname + " -- class already exists!");
+            }
+        }
+    }
+
+    /**
+     * Decodes a class name according to the field-descriptor format in the jvm spec,
+     * section 4.3.2.
+     * @param fdesc name in field-descriptor format (Lfoo/bar/baz;)
+     * @param convertSlashes true iff slashes should be replaced with periods (true for
+     * "real" field-descriptor format; false for names in classdesc)
+     * @return a fully-qualified class name
+     * @throws ValidityException if the name isn't valid
+     */
+    public static String decodeClassName(String fdesc, boolean convertSlashes) throws ValidityException {
+        if(fdesc.charAt(0) != 'L' || fdesc.charAt(fdesc.length()-1) != ';' || fdesc.length() < 3) {
+            throw new ValidityException("invalid name (not in field-descriptor format): " + fdesc);
+        }
+        String subs = fdesc.substring(1, fdesc.length()-1);
+        if(convertSlashes) {
+            return subs.replace('/', '.');
+        } 
+        return subs;
     }
 
     public static String hex(long value) {
