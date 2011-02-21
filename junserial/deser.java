@@ -3,9 +3,23 @@ import java.util.Date;
 
 public class deser {
 	public static void main(String args[]) {
-		do_read();
+		read_generic(args[0]);
 	}
 
+    public static void read_generic(String file) {
+		try {
+			FileInputStream fos = new FileInputStream(file);
+			ObjectInputStream ois = new ObjectInputStream(fos);
+            while(true) {
+                Object o = ois.readObject();
+                System.out.println(o.getClass().getName());
+            } 
+        } catch (EOFException eof) {
+            System.out.println("eof");
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
 	public static void do_read() {
 		try {
 			FileInputStream fos = new FileInputStream("serialize.duh");
