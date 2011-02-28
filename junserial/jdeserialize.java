@@ -13,10 +13,8 @@ import java.util.regex.*;
  *     - "Inner Classes Specification" within the JDK 1.1.8 docs:
  *       http://java.sun.com/products/archive/jdk/1.1/
  *
- *
  * XXX TODO: 
- *     - test non-null package names
- *     - handle Class, ObjectStreamClass cases (2.1)
+ *     - test read exceptions
  *     - text proxy/dynamic proxy classes, plus annotations (2.1)
  *     - test old jdk (particularly with old String instances)
  *     - # For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
@@ -25,13 +23,19 @@ import java.util.regex.*;
  *         - filter java.lang.* classes (on)
  *         - filter array classes (on)
  *         - handle inner classes according to inner classes spec rules (on)
+ *         - output data from blockdata w/manifest
  *     - fixup local/anonymous classes (but how?)
+ *     - handle val$ fields, local classes
+ *     - figure out a way to represent field values?
  *     - split up classes
+ *     - in documentation, note that classdesc can represent an instance of
+ *       ObjectStreamClass
  */
 
 public class jdeserialize {
     public static final String INDENT = "    ";
     public static final int CODEWIDTH = 90;
+    public static final String linesep = System.getProperty("line.separator");
 
     private String filename;
     private Map<Integer,content> handles;
@@ -40,6 +44,20 @@ public class jdeserialize {
     public static class ValidityException extends IOException {
         public ValidityException(String msg) {
             super(msg);
+        }
+    }
+    public class ExceptionReadException extends IOException {
+        public content exceptionobj;
+        public ExceptionReadException(content c) {
+            super("serialized exception read during stream");
+            this.exceptionobj = c;
+        }
+        /**
+         * Gets the Exception object that was thrown.
+         * @returns the content representing the serialized exception object
+         */
+        public content getExceptionObject() {
+            return exceptionobj;
         }
     }
 
@@ -52,12 +70,39 @@ public class jdeserialize {
     }
 
     public enum contenttype {
-        INSTANCE, CLASS, ARRAY, STRING, ENUM, CLASSDESC, BLOCKDATA
+        INSTANCE, CLASS, ARRAY, STRING, ENUM, CLASSDESC, BLOCKDATA, EXCEPTIONSTATE
     }
     public interface content {
         public contenttype getType();
         public int getHandle();
         public void validate() throws ValidityException;
+        public boolean isExceptionObject();
+        public void setIsExceptionObject(boolean value);
+    }
+    public class exceptionstate extends contentbase {
+        public content exceptionobj;
+        public byte[] streamdata;
+        public exceptionstate(content exobj, byte[] data) {
+            super(contenttype.EXCEPTIONSTATE);
+            this.exceptionobj = exobj;
+            this.streamdata = data;
+            this.handle = exobj.getHandle();
+        }
+        public String toString() {
+            StringBuffer sb = new StringBuffer();
+            sb.append("[exceptionstate len " + streamdata.length);
+            if(streamdata.length > 0) {
+                for(int i = 0; i < streamdata.length; i++) {
+                    if((i % 16) == 0) {
+                        sb.append(linesep).append(String.format("%7x: ", Integer.valueOf(i)));
+                    }
+                    sb.append(" ").append(hexnoprefix(streamdata[i]));
+                }
+                sb.append(linesep);
+            }
+            sb.append("]");
+            return sb.toString();
+        }
     }
     public class enumobj extends contentbase {
         public classdesc classdesc;
@@ -176,9 +221,16 @@ public class jdeserialize {
     }
     public class contentbase implements content {
         public int handle;
+        public boolean isExceptionObject;
         protected contenttype type;
         public contentbase(contenttype type) {
             this.type = type;
+        }
+        public boolean isExceptionObject() {
+            return isExceptionObject;
+        }
+        public void setIsExceptionObject(boolean value) {
+            isExceptionObject = value;
         }
         public contenttype getType() {
             return type;
@@ -226,12 +278,10 @@ public class jdeserialize {
                         throw new IOException("SC_EXTERNALIZABLE & SC_SERIALIZABLE encountered");
                     }
                     for(field f: cd.fields) {
-                        //debug("XXX reading field type: " + f.type.toString());
                         Object o = read_FieldValue(f.type, dis);
                         values.put(f, o);
                     }
                     alldata.put(cd, values);
-                    // XXX XXX XXX XXX: handle SC_ENUM more?
                     if((cd.descflags & ObjectStreamConstants.SC_WRITE_METHOD) != 0) {
                         if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
                             throw new IOException("SC_ENUM & SC_WRITE_METHOD encountered!");
@@ -244,7 +294,6 @@ public class jdeserialize {
                     }
                     if((cd.descflags & ObjectStreamConstants.SC_BLOCK_DATA) != 0) {
                         throw new EOFException("hit externalizable with nonzero SC_BLOCK_DATA; can't interpret data");
-                        // XXX: print out the offset, class descriptor
                     } else {
                         ann.put(cd, read_classAnnotation(dis));
                     }
@@ -280,6 +329,9 @@ public class jdeserialize {
                     throw new IOException("array type listed, but typecode is not TC_ARRAY: " + hex(stc));
                 }
                 content c = read_Content(stc, dis, false);
+                if(c.isExceptionObject()) {
+                    throw new ExceptionReadException(c);
+                }
                 return c;
             default:
                 throw new IOException("can't process type: " + f.toString());
@@ -439,16 +491,20 @@ public class jdeserialize {
                 reset();
                 continue;
             }
-            list.add(read_Content(tc, dis, true));
+            content c = read_Content(tc, dis, true);
+            if(c.isExceptionObject()) {
+                throw new ExceptionReadException(c);
+            }
+            list.add(c);
         }
     }
     public void dump_Instance(int indentlevel, instance inst, PrintStream ps) {
         StringBuffer sb = new StringBuffer();
         sb.append("[instance " + hex(inst.handle) + ": " + hex(inst.classdesc.handle) + "/" + inst.classdesc.name);
         if(inst.fielddata != null && inst.fielddata.size() > 0) {
-            sb.append("\n  field data:\n");
+            sb.append(linesep).append("  field data:").append(linesep);
             for(classdesc cd: inst.fielddata.keySet()) {
-                sb.append("    ").append(hex(cd.handle)).append("/").append(cd.name).append(":\n");
+                sb.append("    ").append(hex(cd.handle)).append("/").append(cd.name).append(":").append(linesep);
                 for(field f: inst.fielddata.get(cd).keySet()) {
                     Object o = inst.fielddata.get(cd).get(f);
                     sb.append("        ").append(f.name).append(": ");
@@ -461,9 +517,9 @@ public class jdeserialize {
                             sb.append("r" + hex(h));
                         }
                         sb.append(": ").append(c.toString());
-                        sb.append("\n");
+                        sb.append(linesep);
                     } else {
-                        sb.append("" + o).append("\n");
+                        sb.append("" + o).append(linesep);
                     }
                 }
             }
@@ -527,8 +583,7 @@ public class jdeserialize {
             }
             ps.println(indent(indentlevel)+"}");
         } else {
-            System.out.println("XXX: invalid classdesc type");
-            System.exit(1);
+            throw new ValidityException("encountered invalid classdesc type!");
         }
     }
 
@@ -548,6 +603,7 @@ public class jdeserialize {
         public String[] interfaces;
         public Set<String> enumconstants;
         public boolean isInnerClass = false;
+        public boolean isLocalInnerClass = false;
         public boolean isStaticMemberClass = false;
 
         public classdesc(classdesctype classtype) {
@@ -613,15 +669,21 @@ public class jdeserialize {
     public void reset() {
         debug("reset ordered!");
         handles.clear();
+        curhandle = ObjectStreamConstants.baseWireHandle;  // 0x7e0000
     }
     // XXX: validate that it's a Throwable a la spec
     public content read_Exception(DataInputStream dis) throws IOException {
+        debug("XXX ---------------------------------------------------");
         reset();
         byte tc = dis.readByte();
         if(tc == ObjectStreamConstants.TC_RESET) {
             throw new IOException("TC_RESET for object while reading exception: what should we do?");
         }
         content c = read_Content(tc, dis, false);
+        if(c.isExceptionObject()) {
+            throw new ExceptionReadException(c);
+        }
+        c.setIsExceptionObject(true);
         reset();
         return c;
     }
@@ -636,7 +698,7 @@ public class jdeserialize {
     public content read_prevObject(DataInputStream dis) throws IOException {
             int handle = dis.readInt();
             if(!handles.containsKey(Integer.valueOf(handle))) {
-                debug("XXX handle table:");
+                debug("XXX handle table (looking for " + hex(handle) + "):");
                 for(Integer o: handles.keySet()) {
                     debug("    XXX: " + hex(o));
                 }
@@ -735,14 +797,12 @@ public class jdeserialize {
         if(size < 0) {
             throw new IOException("invalid array size: " + size);
         }
-        debug("XXX array size: " + size);
 
         arraycoll ac = new arraycoll(ft);
         for(int i = 0; i < size; i++) {
             ac.add(read_FieldValue(ft, dis));
             continue;
         }
-        debug("XXX: read array values " + ac.toString());
         return ac;
     }
     public classobj read_newClass(DataInputStream dis) throws IOException {
@@ -791,9 +851,11 @@ public class jdeserialize {
                 debugerr("warning: small string length encoded as TC_LONGSTRING: " + len);
             }
             data = new byte[(int)len];
+        } else if(tc == ObjectStreamConstants.TC_NULL) {
+            data = new byte[0];
+            // XXX: can this even happen?  it shouldn't in sun ObjectOutputStream.. 
         } else {
             throw new IOException("invalid tc byte in string: " + hex(tc));
-            // XXX: handle TC_NULL / TC_REFERENCE here too?
         }
         dis.readFully(data);
         debug("reading new string: handle " + hex(handle) + " bufsz " + data.length);
@@ -831,92 +893,135 @@ public class jdeserialize {
         return i;
     }
 
+    /**
+     * Read the next object corresponding to the spec grammar rule "content", and return
+     * an object of type content.
+     *
+     * By and large, there is a 1:1 mapping of content items and returned instances.  The
+     * one case where this isn't true is when an exception is embedded inside another
+     * object.  When this is encountered, only the serialized exception object is
+     * returned; it's up to the caller to backtrack in order to gather any data from the
+     * object that was being serialized when the exception was thrown.
+     *
+     * @param tc the last byte read from the stream; it must be one of the TC_* values
+     * within ObjectStreamConstants.*
+     * @param dis the DataInputStream to read from
+     * @param blockdata whether or not to read TC_BLOCKDATA (this is the difference
+     * between spec rules "object" and "content").
+     * @returns an object representing the last read item from the stream 
+     * @throws IOException when a validity or I/O error occurs while reading
+     */
     public content read_Content(byte tc, DataInputStream dis, boolean blockdata) throws IOException {
-        debug("XXX read_Content: tc " + hex(tc));
-        switch(tc) {
-            case ObjectStreamConstants.TC_OBJECT:
-                return read_newObject(dis);
-            case ObjectStreamConstants.TC_CLASS:
-                return read_newClass(dis);
-            case ObjectStreamConstants.TC_ARRAY:
-                return read_newArray(dis);
-            case ObjectStreamConstants.TC_STRING:
-            case ObjectStreamConstants.TC_LONGSTRING:
-                return read_newString(tc, dis);
-            case ObjectStreamConstants.TC_ENUM:
-                return read_newEnum(dis);
-            case ObjectStreamConstants.TC_CLASSDESC:
-            case ObjectStreamConstants.TC_PROXYCLASSDESC:
-                return handle_newClassDesc(tc, dis);
-            case ObjectStreamConstants.TC_REFERENCE:
-                return read_prevObject(dis);
-            case ObjectStreamConstants.TC_NULL:
-                return null;
-            case ObjectStreamConstants.TC_EXCEPTION:
-                return read_Exception(dis);
-            case ObjectStreamConstants.TC_BLOCKDATA:
-            case ObjectStreamConstants.TC_BLOCKDATALONG:
-                if(blockdata == false) {
-                    throw new IOException("got a blockdata TC_*, but not allowed here: " + hex(tc));
-                }
-                return read_blockdata(tc, dis);
-            default:
-                throw new IOException("unknown content tc byte in stream: " + hex(tc));
+        try {
+            switch(tc) {
+                case ObjectStreamConstants.TC_OBJECT:
+                    return read_newObject(dis);
+                case ObjectStreamConstants.TC_CLASS:
+                    return read_newClass(dis);
+                case ObjectStreamConstants.TC_ARRAY:
+                    return read_newArray(dis);
+                case ObjectStreamConstants.TC_STRING:
+                case ObjectStreamConstants.TC_LONGSTRING:
+                    return read_newString(tc, dis);
+                case ObjectStreamConstants.TC_ENUM:
+                    return read_newEnum(dis);
+                case ObjectStreamConstants.TC_CLASSDESC:
+                case ObjectStreamConstants.TC_PROXYCLASSDESC:
+                    return handle_newClassDesc(tc, dis);
+                case ObjectStreamConstants.TC_REFERENCE:
+                    return read_prevObject(dis);
+                case ObjectStreamConstants.TC_NULL:
+                    return null;
+                case ObjectStreamConstants.TC_EXCEPTION:
+                    return read_Exception(dis);
+                case ObjectStreamConstants.TC_BLOCKDATA:
+                case ObjectStreamConstants.TC_BLOCKDATALONG:
+                    if(blockdata == false) {
+                        throw new IOException("got a blockdata TC_*, but not allowed here: " + hex(tc));
+                    }
+                    return read_blockdata(tc, dis);
+                default:
+                    throw new IOException("unknown content tc byte in stream: " + hex(tc));
+            }
+        } catch (ExceptionReadException ere) {
+            return ere.getExceptionObject();
         }
     }
 
-    public void run(DataInputStream dis) throws IOException {
-        System.out.println("version 1: " + ObjectStreamConstants.PROTOCOL_VERSION_1);
-        System.out.println("version 2: " + ObjectStreamConstants.PROTOCOL_VERSION_2);
+    public void run(InputStream is) throws IOException {
+        LoggerInputStream lis = null;
+        DataInputStream dis = null;
+        try {
+            lis = new LoggerInputStream(is);
+            dis = new DataInputStream(lis);
+            System.out.println("version 1: " + ObjectStreamConstants.PROTOCOL_VERSION_1);
+            System.out.println("version 2: " + ObjectStreamConstants.PROTOCOL_VERSION_2);
 
-        short magic = dis.readShort();
-        if(magic != ObjectStreamConstants.STREAM_MAGIC) {
-            throw new IOException("file magic mismatch!  expected " + ObjectStreamConstants.STREAM_MAGIC + ", got " + magic);
-        }
-        short streamversion = dis.readShort();
-        if(streamversion != ObjectStreamConstants.STREAM_VERSION) {
-            throw new IOException("file version mismatch!  expected " + ObjectStreamConstants.STREAM_VERSION + ", got " + streamversion);
-        }
-        handles = new HashMap<Integer,content>();
-        curhandle = ObjectStreamConstants.baseWireHandle;  // 0x7e0000
-        ArrayList<content> content = new ArrayList<content>();
-        while(true) {
-            byte tc;
-            try { 
-                tc = dis.readByte();
-                if(tc == ObjectStreamConstants.TC_RESET) {
-                    reset();
-                    continue;
-                }
-            } catch (EOFException eoe) {
-                break;
+            short magic = dis.readShort();
+            if(magic != ObjectStreamConstants.STREAM_MAGIC) {
+                throw new IOException("file magic mismatch!  expected " + ObjectStreamConstants.STREAM_MAGIC + ", got " + magic);
             }
-            content.add(read_Content(tc, dis, true));
-        }
-        debug("");
-        connectMemberClasses();
-        debug("XXX done reading.  content:");
-        for(content c: content) {
-            debug("" + c);
-        }
+            short streamversion = dis.readShort();
+            if(streamversion != ObjectStreamConstants.STREAM_VERSION) {
+                throw new IOException("file version mismatch!  expected " + ObjectStreamConstants.STREAM_VERSION + ", got " + streamversion);
+            }
+            handles = new HashMap<Integer,content>();
+            curhandle = ObjectStreamConstants.baseWireHandle;  // 0x7e0000
+            ArrayList<content> content = new ArrayList<content>();
+            while(true) {
+                byte tc;
+                try { 
+                    lis.record();
+                    tc = dis.readByte();
+                    if(tc == ObjectStreamConstants.TC_RESET) {
+                        reset();
+                        continue;
+                    }
+                } catch (EOFException eoe) {
+                    break;
+                }
+                content c = read_Content(tc, dis, true);
+                if(c.isExceptionObject()) {
+                    c = new exceptionstate(c, lis.getRecordedData());
+                }
+                content.add(c);
+            }
+            debug("");
+            connectMemberClasses();
+            debug("XXX done reading.  content:");
+            for(content c: content) {
+                debug("" + c);
+            }
 
-        debug("");
-        debug("XXXX classes:");
-        for(content c: handles.values()) {
-            if(c instanceof classdesc) {
-                classdesc cl = (classdesc)c;
-                // XXX: make this an option
-                if(!cl.isStaticMemberClass && !cl.isInnerClass && (!cl.isArrayClass() || cl.isArrayClass())) {
-                    dump_ClassDesc(0, cl, System.out);
-                    debug("");
+            debug("");
+            debug("XXXX classes:");
+            for(content c: handles.values()) {
+                if(c instanceof classdesc) {
+                    classdesc cl = (classdesc)c;
+                    // XXX: make this an option
+                    if(!cl.isStaticMemberClass && !cl.isInnerClass && (!cl.isArrayClass() || cl.isArrayClass())) {
+                        dump_ClassDesc(0, cl, System.out);
+                        debug("");
+                    }
                 }
             }
-        }
-        debug("XXXX instances:");
-        for(content c: handles.values()) {
-            if(c instanceof instance) {
-                instance i = (instance)c;
-                dump_Instance(0, i, System.out);
+            debug("XXXX instances:");
+            for(content c: handles.values()) {
+                if(c instanceof instance) {
+                    instance i = (instance)c;
+                    dump_Instance(0, i, System.out);
+                }
+            }
+        } finally {
+            if(dis != null) {
+                try {
+                    dis.close();
+                } catch (Exception ignore) { }
+            }
+            if(lis != null) {
+                try {
+                    lis.close();
+                } catch (Exception ignore) {}
             }
         }
     }
@@ -940,8 +1045,8 @@ public class jdeserialize {
      *     consider C to be an inner class of O named I
      *
      * This functions fills in the isInnerClass value in classdesc, the
-     * isInnerClassReference value in field, and the isStaticMemberClass value in
-     * classdesc where necessary.
+     * isInnerClassReference value in field, the isLocalInnerClass value in 
+     * classdesc, and the isStaticMemberClass value in classdesc where necessary.
      *
      * @throws ValidityException if the found values don't correspond to spec
      */
@@ -968,6 +1073,7 @@ public class jdeserialize {
                 if(!m.matches()) {
                     continue;
                 }
+                boolean islocal = false;
                 Matcher clmat = clpat.matcher(cd.name);
                 if(!clmat.matches()) {
                     throw new ValidityException("inner class enclosing-class reference field exists, but class name doesn't match expected pattern: class " + cd.name + " field " + f.name);
@@ -981,6 +1087,7 @@ public class jdeserialize {
                     throw new ValidityException("outer class field type doesn't match field type name: " + f.classname.value + " outer class name " + outercd.name);
                 }
                 outercd.addInnerClass(cd);
+                cd.isLocalInnerClass = islocal;
                 cd.isInnerClass = true;
                 f.isInnerClassReference = true;
                 newnames.put(cd, inner);
@@ -1011,7 +1118,6 @@ public class jdeserialize {
             for(classdesc cd: classes.values()) {
                 for(field f: cd.fields) {
                     if(f.getJavaType().equals(ncd.name)) {
-                        System.out.println("XXX FIX FIELD: " + f.name + " from " + ncd.name + " to " + newname);
                         f.setReferenceTypeName(newname);
                     }
                 }
@@ -1046,7 +1152,7 @@ public class jdeserialize {
         return subs;
     }
 
-    public static String hex(long value) {
+    public static String hexnoprefix(long value) {
         if(value < 0) {
             value = 256 + value;
         }
@@ -1054,7 +1160,10 @@ public class jdeserialize {
         if(s.length() == 1) {
             s = "0" + s;
         }
-        return "0x" + s;
+        return s;
+    }
+    public static String hex(long value) {
+        return "0x" + hexnoprefix(value);
     }
     public static void debugerr(String message) {
         System.err.println(message);
@@ -1064,30 +1173,23 @@ public class jdeserialize {
     }
 
     public static void main(String[] args) {
-        debug("XXXXXXX LINKSYS/ceng");
         if(args.length < 1) {
             debugerr("args: file1 [file2 .. fileN]");
             System.exit(1);
         }
         for(String filename: args) {
             FileInputStream fis = null;
-            DataInputStream dis = null;
             try {
                 fis = new FileInputStream(filename);
-                dis = new DataInputStream(fis);
                 jdeserialize jd = new jdeserialize(filename);
-                jd.run(dis);
+                jd.run(fis);
             } catch(EOFException eoe) {
                 debugerr("EOF error while attempting to decode file " + filename + ": " + eoe.getMessage());
                 eoe.printStackTrace();      // XXX
             } catch(IOException ioe) {
                 debugerr("error while attempting to decode file " + filename + ": " + ioe.getMessage());
+                ioe.printStackTrace();     // XXX
             } finally {
-                if(dis != null) {
-                    try {
-                        dis.close();
-                    } catch (Exception ignore) { }
-                }
                 if(fis != null) {
                     try {
                         fis.close();
