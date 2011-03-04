@@ -1,5 +1,8 @@
+package bluh.zuh;
+
 import java.util.*;
 import java.io.*;
+
 
 public class blob4 implements Serializable {
     public static class istatic implements Serializable {

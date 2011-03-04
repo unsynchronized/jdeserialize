@@ -14,10 +14,9 @@ import java.util.regex.*;
  *       http://java.sun.com/products/archive/jdk/1.1/
  *
  * XXX TODO: 
- *     - test read exceptions
- *     - text proxy/dynamic proxy classes, plus annotations (2.1)
+ *     - test annotations (2.1)
  *     - test old jdk (particularly with old String instances)
- *     - # For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
+ *     - For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
  *     - error if both serializable & externalizable flags are set
  *     - options
  *         - filter java.lang.* classes (on)
@@ -90,7 +89,7 @@ public class jdeserialize {
         }
         public String toString() {
             StringBuffer sb = new StringBuffer();
-            sb.append("[exceptionstate len " + streamdata.length);
+            sb.append("[exceptionstate object " + exceptionobj.toString() + "  buflen " + streamdata.length);
             if(streamdata.length > 0) {
                 for(int i = 0; i < streamdata.length; i++) {
                     if((i % 16) == 0) {
@@ -582,6 +581,20 @@ public class jdeserialize {
                 dump_ClassDesc(indentlevel+1, icd, ps);
             }
             ps.println(indent(indentlevel)+"}");
+        } else if(cd.classtype == classdesctype.PROXYCLASS) {
+            ps.print(indent(indentlevel) + "// proxy class " + hex(cd.handle));
+            if(cd.superclass != null) {
+                ps.print(" extends " + cd.superclass.name);
+            }
+            ps.println(" implements ");
+            for(String intf: cd.interfaces) {
+                ps.println(indent(indentlevel) + "//    " + intf + ", ");
+            }
+            if((cd.descflags & ObjectStreamConstants.SC_EXTERNALIZABLE) != 0) {
+                ps.println(indent(indentlevel) + "//    java.io.Externalizable");
+            } else {
+                ps.println(indent(indentlevel) + "//    java.io.Serializable");
+            }
         } else {
             throw new ValidityException("encountered invalid classdesc type!");
         }
@@ -774,6 +787,7 @@ public class jdeserialize {
             cd.annotations = read_classAnnotation(dis);
             cd.superclass = read_newClassDesc(dis);
             setHandle(handle, cd);
+            cd.name = "(proxy class; no name)";
             debug("read new proxy classdesc: handle " + hex(handle) + " names [" + Arrays.toString(interfaces) + "]");
             return cd;
         } else {
@@ -1065,6 +1079,9 @@ public class jdeserialize {
         Pattern fpat = Pattern.compile("^this\\$(\\d+)$");
         Pattern clpat = Pattern.compile("^((?:[^\\$]+\\$)*[^\\$]+)\\$([^\\$]+)$");
         for(classdesc cd: classes.values()) {
+            if(cd.classtype == classdesctype.PROXYCLASS) {
+                continue;
+            }
             for(field f: cd.fields) {
                 if(f.type != fieldtype.OBJECT) {
                     continue;
@@ -1094,6 +1111,9 @@ public class jdeserialize {
             }
         }
         for(classdesc cd: classes.values()) {
+            if(cd.classtype == classdesctype.PROXYCLASS) {
+                continue;
+            }
             if(cd.isInnerClass) {
                 continue;
             }
@@ -1116,6 +1136,9 @@ public class jdeserialize {
                 throw new ValidityException("can't rename class from " + ncd.name + " to " + newname + " -- class already exists!");
             }
             for(classdesc cd: classes.values()) {
+                if(cd.classtype == classdesctype.PROXYCLASS) {
+                    continue;
+                }
                 for(field f: cd.fields) {
                     if(f.getJavaType().equals(ncd.name)) {
                         f.setReferenceTypeName(newname);
