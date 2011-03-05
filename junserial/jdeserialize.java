@@ -14,18 +14,19 @@ import java.util.regex.*;
  *       http://java.sun.com/products/archive/jdk/1.1/
  *
  * XXX TODO: 
- *     - better dumping of instances/content; make sure blockdata (e.g. ser10) gets dumped as well
- *     - test old jdk (particularly with old String instances)
+ *     - better dumping of instances/content
+ *     - normalize method names
  *     - options
+ *         - textual dump of all content/classes (on)
  *         - filter java.lang.* classes (on)
  *         - filter array classes (on)
  *         - handle inner classes according to inner classes spec rules (on)
- *         - output data from blockdata w/manifest
- *     - handle val$ fields, local classes
- *     - figure out a way to represent field values?
+ *         - filter val$this fields (off)
+ *         - output data from blockdata w/manifest (off)
+ *         - filter out non-Java characters from all classes (on)
  *     - in documentation, note that classdesc can represent an instance of
- *     - normalize method names
  *       ObjectStreamClass
+ *     - test old jdk (particularly with old String instances)
  */
 
 public class jdeserialize {
@@ -37,6 +38,19 @@ public class jdeserialize {
     private Map<Integer,content> handles;
     private int curhandle;
 
+    public static String unicodeEscape(String str) {
+        StringBuffer sb = new StringBuffer();
+        int cplen = str.codePointCount(0, str.length());
+        for(int i = 0; i < cplen; i++) {
+            int cp = str.codePointAt(i);
+            if(cp < 0x20 || cp > 0x7f || cp == '"') {
+                sb.append("\\u" + hexnoprefix(4));
+            } else {
+                sb.appendCodePoint(cp);
+            }
+        }
+        return sb.toString();
+    }
     public static class ValidityException extends IOException {
         public ValidityException(String msg) {
             super(msg);
@@ -123,7 +137,7 @@ public class jdeserialize {
             return x;
         }
         public String toString() {
-            return "[String " + hex(handle) + ": " + value + "]";
+            return "[String " + hex(handle) + ": \"" + value + "\"]";
         }
         public stringobj(int handle, byte[] data) throws IOException {
             super(contenttype.STRING);
@@ -211,7 +225,7 @@ public class jdeserialize {
             this.data = data;
         }
         public String toString() {
-            return "[array " + hex(handle) + " cd " + classdesc.toString() + ": " 
+            return "[array " + hex(handle) + " classdesc " + classdesc.toString() + ": " 
                 + data.toString() + "]";
         }
     }
@@ -258,7 +272,9 @@ public class jdeserialize {
         }
         public String toString() {
             StringBuffer sb = new StringBuffer();
-            sb.append("[instance " + hex(handle) + ": " + hex(classdesc.handle) + "/" + classdesc.name).append("]");
+            sb.append(classdesc.name).append(' ').append("_h").append(hex(handle))
+                .append(" = r_").append(hex(classdesc.handle)).append(";  ");
+            //sb.append("// [instance " + hex(handle) + ": " + hex(classdesc.handle) + "/" + classdesc.name).append("]");
             return sb.toString();
         }
         public void readClassdata(DataInputStream dis) throws IOException {
@@ -1232,11 +1248,14 @@ public class jdeserialize {
     }
 
     public static String hexnoprefix(long value) {
+        return hexnoprefix(value, 2);
+    }
+    public static String hexnoprefix(long value, int len) {
         if(value < 0) {
             value = 256 + value;
         }
         String s = Long.toString(value, 16);
-        if(s.length() == 1) {
+        while(s.length() < len) {
             s = "0" + s;
         }
         return s;
