@@ -9,23 +9,12 @@ public class ser13 {
 
 	public static void do_write() {
 		try {
-            blobproxy bp = new blobproxy(55);
-            Class<?> pclass = Proxy.getProxyClass(blobproxy.class.getClassLoader(), 
-                    new Class[] { List.class, Iterator.class });
-            Constructor<?> constructor = pclass.getConstructor(new Class<?>[] { InvocationHandler.class });
-            List s = (List)constructor.newInstance(new Object[] { bp });
-            System.out.println("s.get: " + s.get(2));
-            Iterator it = (Iterator)s;
-            System.out.println("it.next: " + it.next());
+            blob5 b5 = new blob5(9989);
 
 			FileOutputStream fos = new FileOutputStream("ser13.duh");
-			ModObjectOutputStream oos = new ModObjectOutputStream(fos);
+			ObjectOutputStream oos = new ObjectOutputStream(fos);
             try {
-                oos.writeObject(bp);
-                oos.writeObject(pclass);
-                oos.writeObject(s);
-                oos.writeObject(it);
-                oos.writeObject(it.next());
+                oos.writeObject(b5.getinner());
             } catch (IOException ignore) {
             }
             oos.writeObject("klsadfj lkasdf lkadsfkl kdsfalklj fof course");

@@ -70,6 +70,13 @@ public class blob5 implements Serializable {
         return "[blob5 a " + a + "  b " + b + "  i " + i.toString() + "]";
     }
 
+    public inner getinner() {
+        return i;
+    }
+    public istatic getist() {
+        return ist;
+    }
+
     @blobann(id = 5, sfoo = "sSsfoo", cl = Integer.class)
     public String someStuff() {
         return "someStuff: " + b;

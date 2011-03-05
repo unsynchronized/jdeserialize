@@ -327,7 +327,7 @@ public class jdeserialize {
                     throw new IOException("array type listed, but typecode is not TC_ARRAY: " + hex(stc));
                 }
                 content c = read_Content(stc, dis, false);
-                if(c.isExceptionObject()) {
+                if(c != null && c.isExceptionObject()) {
                     throw new ExceptionReadException(c);
                 }
                 return c;
@@ -490,7 +490,7 @@ public class jdeserialize {
                 continue;
             }
             content c = read_Content(tc, dis, true);
-            if(c.isExceptionObject()) {
+            if(c != null && c.isExceptionObject()) {
                 throw new ExceptionReadException(c);
             }
             list.add(c);
@@ -700,15 +700,29 @@ public class jdeserialize {
         handles.clear();
         curhandle = ObjectStreamConstants.baseWireHandle;  // 0x7e0000
     }
-    // XXX: validate that it's a Throwable a la spec
+    /**
+     * Read the content of a thrown exception object.  According to the spec, this must be
+     * an object of type Throwable.  Although the Sun JDK always appears to provide enough
+     * information about the hierarchy to reach all the way back to java.lang.Throwable,
+     * it's unclear whether this is actually a requirement.  From my reading, it's
+     * possible that some other ObjectOutputStream implementations may leave some gaps in
+     * the hierarchy, forcing this app to hit the classloader.  To avoid this, we merely
+     * ensure that the written object is indeed an instance; ensuring that the object is
+     * indeed a Throwable is an exercise left to the user.
+     */
     public content read_Exception(DataInputStream dis) throws IOException {
-        debug("XXX ---------------------------------------------------");
         reset();
         byte tc = dis.readByte();
         if(tc == ObjectStreamConstants.TC_RESET) {
-            throw new IOException("TC_RESET for object while reading exception: what should we do?");
+            throw new ValidityException("TC_RESET for object while reading exception: what should we do?");
         }
         content c = read_Content(tc, dis, false);
+        if(c == null) {
+            throw new ValidityException("stream signaled for an exception, but exception object was null!");
+        }
+        if(!(c instanceof instance)) { 
+            throw new ValidityException("stream signaled for an exception, but content is not an object!");
+        }
         if(c.isExceptionObject()) {
             throw new ExceptionReadException(c);
         }
@@ -727,11 +741,12 @@ public class jdeserialize {
     public content read_prevObject(DataInputStream dis) throws IOException {
             int handle = dis.readInt();
             if(!handles.containsKey(Integer.valueOf(handle))) {
-                debug("XXX handle table (looking for " + hex(handle) + "):");
-                for(Integer o: handles.keySet()) {
-                    debug("    XXX: " + hex(o));
-                }
-                throw new IOException("can't find an entry for handle " + hex(handle));
+                // XXX: remove
+                //debug("handle table (looking for " + hex(handle) + "):");
+                //for(Integer o: handles.keySet()) {
+                //    debug("    handle: " + hex(o));
+                //}
+                throw new ValidityException("can't find an entry for handle " + hex(handle));
             }
             content c = handles.get(handle);
             debug("prevObject: handle " + hex(c.getHandle()) + " classdesc " + c.toString());
@@ -882,8 +897,7 @@ public class jdeserialize {
             }
             data = new byte[(int)len];
         } else if(tc == ObjectStreamConstants.TC_NULL) {
-            data = new byte[0];
-            // XXX: can this even happen?  it shouldn't in sun ObjectOutputStream.. 
+            throw new ValidityException("stream signaled TC_NULL when string type expected!");
         } else {
             throw new IOException("invalid tc byte in string: " + hex(tc));
         }
@@ -1011,14 +1025,14 @@ public class jdeserialize {
                     break;
                 }
                 content c = read_Content(tc, dis, true);
-                if(c.isExceptionObject()) {
+                if(c != null && c.isExceptionObject()) {
                     c = new exceptionstate(c, lis.getRecordedData());
                 }
                 content.add(c);
             }
             debug("");
             connectMemberClasses();
-            debug("XXX done reading.  content:");
+            debug("XXX content:");
             for(content c: content) {
                 debug("" + c);
             }
@@ -1077,6 +1091,13 @@ public class jdeserialize {
      * This functions fills in the isInnerClass value in classdesc, the
      * isInnerClassReference value in field, the isLocalInnerClass value in 
      * classdesc, and the isStaticMemberClass value in classdesc where necessary.
+     *
+     * A word on static classes: serializing a static member class S doesn't inherently
+     * require serialization of its parent class P.  Unlike inner classes, S doesn't
+     * retain an instance of P, and therefore P's class description doesn't need to be
+     * written.  In these cases, if parent classes can be found, their static member
+     * classes will be connected; but if they can't be found, the names will not be
+     * changed and no ValidityException will be thrown.
      *
      * @throws ValidityException if the found values don't correspond to spec
      */
@@ -1139,12 +1160,11 @@ public class jdeserialize {
             }
             String outer = clmat.group(1), inner = clmat.group(2);
             classdesc outercd = classes.get(outer);
-            if(outercd == null) {
-                throw new ValidityException("couldn't connect static member class: outer class not found for class name " + cd.name);
+            if(outercd != null) {
+                outercd.addInnerClass(cd);
+                cd.isStaticMemberClass = true;
+                newnames.put(cd, inner);
             }
-            outercd.addInnerClass(cd);
-            cd.isStaticMemberClass = true;
-            newnames.put(cd, inner);
         }
         for(classdesc ncd: newnames.keySet()) {
             String newname = newnames.get(ncd);
