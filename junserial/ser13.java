@@ -18,6 +18,8 @@ public class ser13 {
             } catch (IOException ignore) {
             }
             oos.writeObject("klsadfj lkasdf lkadsfkl kdsfalklj fof course");
+            int[] xi = new int[] { 1, 2, 3, 4, 5 };
+            oos.writeObject(xi);
 			oos.flush();
 		} catch(FileNotFoundException e) {
 			System.out.println("file not found");
