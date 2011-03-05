@@ -223,17 +223,6 @@ public class jdeserialize {
                 }
             }
         }
-// XXX: remove?
-//        if(inst.annotations != null && inst.annotations.size() > 0) {
-//            sb.append(indent(1)).append("annotations: ").append(linesep);
-//            for(classdesc cd: inst.annotations.keySet()) {
-//                sb.append(indent(1)).append(cd.name).append(": ").append(linesep);
-//                List<content> cont = inst.annotations.get(cd);
-//                for(content c: cont) {
-//                    sb.append(indent(2)).append(c.toString()).append(linesep);
-//                }
-//            }
-//        }
         sb.append("]");
         ps.println(sb);
     }
