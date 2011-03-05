@@ -14,7 +14,7 @@ import java.util.regex.*;
  *       http://java.sun.com/products/archive/jdk/1.1/
  *
  * XXX TODO: 
- *     - test annotations (2.1)
+ *     - better dumping of instances/content; make sure blockdata (e.g. ser10) gets dumped as well
  *     - test old jdk (particularly with old String instances)
  *     - For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
  *     - error if both serializable & externalizable flags are set
@@ -267,7 +267,6 @@ public class jdeserialize {
         public void readClassdata(DataInputStream dis) throws IOException {
             ArrayList<classdesc> classes = new ArrayList<classdesc>();
             classdesc.getHierarchy(classes);
-            debug("XXXhierarchy: " + classes.size() + " cd: " + classdesc.toString());
             Map<classdesc, Map<field, Object>> alldata = new HashMap<classdesc, Map<field, Object>>();
             Map<classdesc, List<content>> ann = new HashMap<classdesc, List<content>>();
             for(classdesc cd: classes) {
@@ -523,11 +522,28 @@ public class jdeserialize {
                 }
             }
         }
+        if(inst.annotations != null && inst.annotations.size() > 0) {
+            sb.append(indent(1)).append("annotations: ").append(linesep);
+            for(classdesc cd: inst.annotations.keySet()) {
+                sb.append(indent(1)).append(cd.name).append(": ").append(linesep);
+                List<content> cont = inst.annotations.get(cd);
+                for(content c: cont) {
+                    sb.append(indent(2)).append(c.toString()).append(linesep);
+                }
+            }
+        }
         sb.append("]");
         ps.println(sb);
     }
 
     public void dump_ClassDesc(int indentlevel, classdesc cd, PrintStream ps) throws IOException {
+        if(cd.annotations != null && cd.annotations.size() > 0) {
+            ps.println(indent(indentlevel) + "// annotations: ");
+            for(content c: cd.annotations) {
+                ps.print(indent(indentlevel) + "// " + indent(1));
+                ps.println(c.toString());
+            }
+        }
         if(cd.classtype == classdesctype.NORMALCLASS) {
             if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
                 ps.print(indent(indentlevel) + "enum " + cd.name + " {");
@@ -611,7 +627,7 @@ public class jdeserialize {
         public byte descflags;
         public field[] fields;
         public List<classdesc> innerclasses;
-        public List annotations;
+        public List<content> annotations;
         public classdesc superclass;
         public String[] interfaces;
         public Set<String> enumconstants;
