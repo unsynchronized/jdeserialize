@@ -11,7 +11,7 @@ import java.util.*;
  */
 public interface content {
     /**
-     * @returns the type of instance represented by this object.
+     * @return the type of instance represented by this object.
      */
     public contenttype getType();
 
@@ -25,7 +25,7 @@ public interface content {
      * during a serialized objct's writeObject() implementation), then the stream resets
      * before and after the exception is serialized.  
      *
-     * @returns the handle assigned in the stream
+     * @return the handle assigned in the stream
      */
     public int getHandle();
 
@@ -43,7 +43,7 @@ public interface content {
      * Note:  Not every Throwable or Exception in the stream will have this flag set to
      * true; only those which were thrown <i>during serialization</i> will
      * 
-     * @returns true iff the object was an exception thrown during serialization
+     * @return true iff the object was an exception thrown during serialization
      */
     public boolean isExceptionObject();
 

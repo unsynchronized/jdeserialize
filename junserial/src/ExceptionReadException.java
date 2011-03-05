@@ -19,7 +19,7 @@ public class ExceptionReadException extends IOException {
     }
     /**
      * Gets the Exception object that was thrown.
-     * @returns the content representing the serialized exception object
+     * @return the content representing the serialized exception object
      */
     public content getExceptionObject() {
         return exceptionobj;

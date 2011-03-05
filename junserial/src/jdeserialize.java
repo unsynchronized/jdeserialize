@@ -4,7 +4,7 @@ import java.io.*;
 import java.util.*;
 import java.util.regex.*;
 
-/*
+/**
  *
  * References:
  *     - Java Object Serialization Specification ch. 6 (Object Serialization Stream
@@ -879,11 +879,35 @@ public class jdeserialize {
     }
 
     public static void main(String[] args) {
-        if(args.length < 1) {
-            debugerr("args: file1 [file2 .. fileN]");
+        HashMap<String, Integer> options = new HashMap<String, Integer>();
+        Getopt go = new Getopt();
+        go.addOption("-help", 0, "Show this list.");
+        go.addOption("-debug", 0, "Write debug info generated during parsing to stdout.");
+        go.addOption("-javalang", 0, "Filter out java.lang.* classes from class output.");
+        go.addOption("-nocontent", 0, "Don't output textual descriptions of instances.");
+        go.addOption("-noarray", 0, "Don't filter array classes from class declarations.");
+        go.addOption("-noinner", 0, "Don't attempt connect inner classes to their enclosing classes.");
+        go.addOption("-filternames", 0, "In class names, replace illegal Java identifier characters with legal ones.");
+        go.addOption("-noclasses", 0, "Don't output class declarations.");
+        go.addOption("-blockdata", 1, "Write raw blockdata out to the specified file.");
+        go.addOption("-blockdatamanifest", 1, "Write blockdata manifest out to the specified file.");
+        try {
+            go.parse(args);
+        } catch (Getopt.OptionParseException ope) {
+            System.err.println("argument error: " + ope.getMessage());
+            System.out.println(go.getDescriptionString());
             System.exit(1);
         }
-        for(String filename: args) {
+        if(go.hasOption("-help")) {
+            System.out.println(go.getDescriptionString());
+            System.exit(1);
+        }
+        List<String> fargs = go.getOtherArguments();
+        if(fargs.size() < 1) {
+            debugerr("args: [options] file1 [file2 .. fileN]");
+            System.exit(1);
+        }
+        for(String filename: fargs) {
             FileInputStream fis = null;
             try {
                 fis = new FileInputStream(filename);

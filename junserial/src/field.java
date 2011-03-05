@@ -30,7 +30,7 @@ public class field {
      * connectMemberClasses() -- if this hasn't been called, or if the field hasn't been
      * otherwise set by setIsInnerClassReference(), it will be false;
      *
-     * @returns true if the class is an inner class reference
+     * @return true if the class is an inner class reference
      */
     public boolean isInnerClassReference() {
         return isInnerClassReference;
@@ -74,7 +74,7 @@ public class field {
     /**
      * Get a string representing the type for this field in Java (the language)
      * format.
-     * @returns a string representing the fully-qualified type of the field
+     * @return a string representing the fully-qualified type of the field
      * @throws IOException if a validity or I/O error occurs
      */
     public String getJavaType() throws IOException {

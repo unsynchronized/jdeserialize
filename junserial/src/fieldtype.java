@@ -47,7 +47,7 @@ public enum fieldtype {
     /**
      * Gets the class name for a reference or array type.
      *
-     * @returns the name of the class being referred to, or null if this is not a
+     * @return the name of the class being referred to, or null if this is not a
      * reference/array type
      */
     public String getJavaType() {
@@ -57,7 +57,7 @@ public enum fieldtype {
     /**
      * Gets the type character for this field.
      *
-     * @returns the type code character for this field; values will be one of those in
+     * @return the type code character for this field; values will be one of those in
      * prim_typecode or obj_typecode in the protocol spec
      */
     public char ch() { return ch; }
@@ -67,7 +67,7 @@ public enum fieldtype {
      *
      * @param b the type code; must be one of the charcaters in obj_typecode or
      * prim_typecode in the protocol spec
-     * @returns the corresponding fieldtype enum
+     * @return the corresponding fieldtype enum
      * @throws ValidityException if the type code is invalid
      */
     public static fieldtype get(byte b) throws ValidityException {
