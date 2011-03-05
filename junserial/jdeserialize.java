@@ -16,18 +16,15 @@ import java.util.regex.*;
  * XXX TODO: 
  *     - better dumping of instances/content; make sure blockdata (e.g. ser10) gets dumped as well
  *     - test old jdk (particularly with old String instances)
- *     - For non-serializable classes, the number of fields is always zero. Neither the SC_SERIALIZABLE nor the SC_EXTERNALIZABLE flag bits are set. (error if fields > 0)
- *     - error if both serializable & externalizable flags are set
  *     - options
  *         - filter java.lang.* classes (on)
  *         - filter array classes (on)
  *         - handle inner classes according to inner classes spec rules (on)
  *         - output data from blockdata w/manifest
- *     - fixup local/anonymous classes (but how?)
  *     - handle val$ fields, local classes
  *     - figure out a way to represent field values?
- *     - split up classes
  *     - in documentation, note that classdesc can represent an instance of
+ *     - normalize method names
  *       ObjectStreamClass
  */
 
@@ -363,7 +360,7 @@ public class jdeserialize {
             return this.javatype;
         }
         public char ch() { return ch; }
-        public static fieldtype get(byte b) throws IOException {
+        public static fieldtype get(byte b) throws ValidityException {
             switch(b) {
                 case 'B': 
                     return BYTE;
@@ -386,7 +383,7 @@ public class jdeserialize {
                 case 'L':
                     return OBJECT;
                 default:
-                    throw new IOException("invalid field type char: " + b);
+                    throw new ValidityException("invalid field type char: " + b);
             }
         }
     }
@@ -676,9 +673,17 @@ public class jdeserialize {
             classes.add(this);
         }
         public void validate() throws ValidityException {
+            // If neither SC_SERIALIZABLE nor SC_EXTERNALIZABLE is set, then the number of
+            // fields is always zero.  (spec section 4.3)
+            if((descflags & (ObjectStreamConstants.SC_SERIALIZABLE | ObjectStreamConstants.SC_EXTERNALIZABLE)) == 0 && fields != null && fields.length > 0) {
+                throw new ValidityException("non-serializable, non-externalizable class has fields!");
+            }
+            if((descflags & (ObjectStreamConstants.SC_SERIALIZABLE | ObjectStreamConstants.SC_EXTERNALIZABLE)) == (ObjectStreamConstants.SC_SERIALIZABLE | ObjectStreamConstants.SC_EXTERNALIZABLE)) {
+                throw new ValidityException("both Serializable and Externalizable are set!");
+            }
             if((descflags & ObjectStreamConstants.SC_ENUM) != 0) {
                 // we're an enum; shouldn't have any fields/superinterfaces
-                if(fields != null || interfaces != null) {
+                if((fields != null && fields.length > 0) || interfaces != null) {
                     throw new ValidityException("enums shouldn't implement interfaces or have non-constant fields!");
                 }
             } else {
@@ -731,8 +736,11 @@ public class jdeserialize {
         return c;
     }
 
-    // XXX: merge classDesc and newClassDesc.  Fine if the stream is well-formed, 
-    // but, well....
+    public classdesc read_classDesc(DataInputStream dis) throws IOException {
+        byte tc = dis.readByte();
+        classdesc cd = handle_classDesc(tc, dis, false);
+        return cd;
+    }
     public classdesc read_newClassDesc(DataInputStream dis) throws IOException {
         byte tc = dis.readByte();
         classdesc cd = handle_newClassDesc(tc, dis);
@@ -741,11 +749,6 @@ public class jdeserialize {
     public content read_prevObject(DataInputStream dis) throws IOException {
             int handle = dis.readInt();
             if(!handles.containsKey(Integer.valueOf(handle))) {
-                // XXX: remove
-                //debug("handle table (looking for " + hex(handle) + "):");
-                //for(Integer o: handles.keySet()) {
-                //    debug("    handle: " + hex(o));
-                //}
                 throw new ValidityException("can't find an entry for handle " + hex(handle));
             }
             content c = handles.get(handle);
@@ -754,6 +757,9 @@ public class jdeserialize {
     }
 
     public classdesc handle_newClassDesc(byte tc, DataInputStream dis) throws IOException {
+        return handle_classDesc(tc, dis, true);
+    }
+    public classdesc handle_classDesc(byte tc, DataInputStream dis, boolean mustBeNew) throws IOException {
         if(tc == ObjectStreamConstants.TC_CLASSDESC) {
             String name = dis.readUTF();
             long serialVersionUID = dis.readLong();
@@ -788,14 +794,20 @@ public class jdeserialize {
             cd.descflags = descflags;
             cd.fields = fields;
             cd.annotations = read_classAnnotation(dis);
-            cd.superclass = read_newClassDesc(dis);
+            cd.superclass = read_classDesc(dis);
             setHandle(handle, cd);
             debug("read new classdesc: handle " + hex(handle) + " name " + name);
             return cd;
         } else if(tc == ObjectStreamConstants.TC_NULL) {
+            if(mustBeNew) {
+                throw new ValidityException("expected new class description -- got null!");
+            }
             debug("read null classdesc");
             return null;
         } else if(tc == ObjectStreamConstants.TC_REFERENCE) {
+            if(mustBeNew) {
+                throw new ValidityException("expected new class description -- got a reference!");
+            }
             content c = read_prevObject(dis);
             if(!(c instanceof classdesc)) {
                 throw new IOException("referenced object not a class description!");
@@ -816,18 +828,18 @@ public class jdeserialize {
             cd.handle = handle;
             cd.interfaces = interfaces;
             cd.annotations = read_classAnnotation(dis);
-            cd.superclass = read_newClassDesc(dis);
+            cd.superclass = read_classDesc(dis);
             setHandle(handle, cd);
             cd.name = "(proxy class; no name)";
             debug("read new proxy classdesc: handle " + hex(handle) + " names [" + Arrays.toString(interfaces) + "]");
             return cd;
         } else {
-            throw new IOException("expected TC_CLASSDESC or TC_PROXYCLASSDESC, got " + hex(tc));
+            throw new ValidityException("expected a valid class description starter got " + hex(tc));
         }
     }
     public arrayobj read_newArray(DataInputStream dis) throws IOException {
-        classdesc cd = read_newClassDesc(dis);
-        int handle = newHandle();       // XXX set
+        classdesc cd = read_classDesc(dis);
+        int handle = newHandle();
         debug("reading new array: handle " + hex(handle) + " classdesc " + cd.toString());
         if(cd.name.length() < 2) {
             throw new IOException("invalid name in array classdesc: " + cd.name);
@@ -836,7 +848,7 @@ public class jdeserialize {
         return new arrayobj(handle, cd, ac);
     }
     public arraycoll read_arrayValues(String str, DataInputStream dis) throws IOException {
-        byte b = str.getBytes("UTF-8")[0];      // XXX: redecoding sucks.
+        byte b = str.getBytes("UTF-8")[0];
         fieldtype ft = fieldtype.get(b);
         int size = dis.readInt();
         if(size < 0) {
@@ -851,7 +863,7 @@ public class jdeserialize {
         return ac;
     }
     public classobj read_newClass(DataInputStream dis) throws IOException {
-        classdesc cd = read_newClassDesc(dis);
+        classdesc cd = read_classDesc(dis);
         int handle = newHandle();
         debug("reading new class: handle " + hex(handle) + " classdesc " + cd.toString());
         classobj c = new classobj(handle, cd);
@@ -859,7 +871,7 @@ public class jdeserialize {
         return c;
     }
     public enumobj read_newEnum(DataInputStream dis) throws IOException {
-        classdesc cd = read_newClassDesc(dis);
+        classdesc cd = read_classDesc(dis);
         if(cd == null) {
             throw new IOException("enum classdesc can't be null!");
         }
@@ -925,7 +937,7 @@ public class jdeserialize {
         return new blockdata(b);
     }
     public instance read_newObject(DataInputStream dis) throws IOException {
-        classdesc cd = read_newClassDesc(dis);
+        classdesc cd = read_classDesc(dis);
         int handle = newHandle();
         debug("reading new object: handle " + hex(handle) + " classdesc " + cd.toString());
         instance i = new instance();
@@ -1031,7 +1043,16 @@ public class jdeserialize {
                 content.add(c);
             }
             debug("");
+            debug("XXX validating");
+            for(content c: handles.values()) {
+                c.validate();
+            }
             connectMemberClasses();
+
+            debug("XXX validating");
+            for(content c: handles.values()) {
+                c.validate();
+            }
             debug("XXX content:");
             for(content c: content) {
                 debug("" + c);
@@ -1042,7 +1063,6 @@ public class jdeserialize {
             for(content c: handles.values()) {
                 if(c instanceof classdesc) {
                     classdesc cl = (classdesc)c;
-                    // XXX: make this an option
                     if(!cl.isStaticMemberClass && !cl.isInnerClass && (!cl.isArrayClass() || cl.isArrayClass())) {
                         dump_ClassDesc(0, cl, System.out);
                         debug("");
@@ -1244,10 +1264,10 @@ public class jdeserialize {
                 jd.run(fis);
             } catch(EOFException eoe) {
                 debugerr("EOF error while attempting to decode file " + filename + ": " + eoe.getMessage());
-                eoe.printStackTrace();      // XXX
+                eoe.printStackTrace();
             } catch(IOException ioe) {
                 debugerr("error while attempting to decode file " + filename + ": " + ioe.getMessage());
-                ioe.printStackTrace();     // XXX
+                ioe.printStackTrace();
             } finally {
                 if(fis != null) {
                     try {
