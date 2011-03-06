@@ -19,6 +19,7 @@
             <fileset dir="${build.dir}" includes="**/*class" />
             <fileset dir="." includes="${src.dir}/**/*" />
             <fileset dir="." includes="build.xml" />
+            <fileset dir="." includes="README" />
             <manifest>
                 <attribute name="Main-Class" value="org.unsynchronized.jdeserialize" />
             </manifest>
