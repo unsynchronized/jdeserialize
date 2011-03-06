@@ -3,4 +3,5 @@ syntax: glob
 .*.swp
 **/*.class
 build
+javadoc/
 jdeserialize.jar
