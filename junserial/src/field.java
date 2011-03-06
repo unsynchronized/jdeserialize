@@ -78,7 +78,7 @@ public class field {
      * @throws IOException if a validity or I/O error occurs
      */
     public String getJavaType() throws IOException {
-        return jdeserialize.resolveJavaType(this.type, this.classname == null ? null : this.classname.value, true);
+        return jdeserialize.resolveJavaType(this.type, this.classname == null ? null : this.classname.value, true, false);
     }
     
     /**

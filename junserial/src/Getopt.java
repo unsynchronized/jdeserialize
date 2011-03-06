@@ -67,6 +67,17 @@ public class Getopt {
     }
 
     /**
+     * Gets the list of arguments for a given option, or null if the option wasn't
+     * specified.
+     * 
+     * @param option the option 
+     * @return the list of arguments for option
+     */
+    public List<String> getArguments(String option) {
+        return optvals.get(option);
+    }
+
+    /**
      * Add an option to the internal set, including the number of arguments and the
      * description. 
      *

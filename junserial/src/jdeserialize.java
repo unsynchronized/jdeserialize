@@ -14,6 +14,8 @@ import java.util.regex.*;
  *       http://download.oracle.com/javase/1.5.0/docs/guide/jni/spec/types.html#wp16542
  *     - "Inner Classes Specification" within the JDK 1.1.8 docs:
  *       http://java.sun.com/products/archive/jdk/1.1/
+ *     - "Java Language Specification", third edition, particularly section 3:
+ *       http://java.sun.com/docs/books/jls/third_edition/html/j3TOC.html
  *
  * XXX TODO: 
  *     - better dumping of instances/content
@@ -36,10 +38,28 @@ public class jdeserialize {
     public static final String INDENT = "    ";
     public static final int CODEWIDTH = 90;
     public static final String linesep = System.getProperty("line.separator");
+    public static final String[] keywords = new String[] {
+        "abstract", "continue", "for", "new", "switch", "assert", "default", "if",
+        "package", "synchronized", "boolean", "do", "goto", "private", "this",
+        "break", "double", "implements", "protected", "throw", "byte", "else",
+        "import", "public", "throws", "case", "enum", "instanceof", "return",
+        "transient", "catch", "extends", "int", "short", "try", "char", "final",
+        "interface", "static", "void", "class", "finally", "long", "strictfp",
+        "volatile", "const", "float", "native", "super", "while" }; 
+    public static HashSet<String> keywordSet;
 
     private String filename;
-    private Map<Integer,content> handles;
+    private Map<Integer,content> handles = new HashMap<Integer,content>();
+    private ArrayList<content> content;
     private int curhandle;
+    private boolean debugEnabled;
+
+    static {
+        keywordSet = new HashSet<String>();
+        for(String kw: keywords) {
+            keywordSet.add(kw);
+        }
+    }
 
     /**
      * Suitably escapes non-printable-ASCII characters (and doublequotes) for use 
@@ -149,7 +169,7 @@ public class jdeserialize {
         return curhandle++;
     }
 
-    public static String resolveJavaType(fieldtype type, String classname, boolean convertSlashes)  throws IOException {
+    public static String resolveJavaType(fieldtype type, String classname, boolean convertSlashes, boolean fixname)  throws IOException {
         if(type == fieldtype.ARRAY) {
             StringBuffer asb = new StringBuffer("");
             for(int i = 0; i < classname.length(); i++) {
@@ -159,7 +179,11 @@ public class jdeserialize {
                         asb.append("[]");
                         continue;
                     case 'L':
-                        return decodeClassName(classname.substring(i), convertSlashes) + asb.toString();
+                        String cn = decodeClassName(classname.substring(i), convertSlashes);
+                        if(fixname) {
+                            cn = fixClassName(cn);
+                        }
+                        return cn + asb.toString();
                     default:
                         if(ch < 1 || ch > 127) {
                             throw new ValidityException("invalid array field type descriptor character: " + classname);
@@ -168,7 +192,11 @@ public class jdeserialize {
                         if(i != (classname.length()-1)) {
                             throw new ValidityException("array field type descriptor is too long: " + classname);
                         }
-                        return ft.getJavaType() + asb.toString();
+                        String ftn = ft.getJavaType();
+                        if(fixname) {
+                            ftn = fixClassName(ftn);
+                        }
+                        return ftn + asb.toString();
                 }
             }
             throw new ValidityException("array field type descriptor is too short: " + classname);
@@ -227,7 +255,60 @@ public class jdeserialize {
         ps.println(sb);
     }
 
-    public static void dump_ClassDesc(int indentlevel, classdesc cd, PrintStream ps) throws IOException {
+    /**
+     * "Fix" the given name by transforming illegal characters, such that the end result
+     * is a legal Java identifier that is not a keyword.  
+     * If the string is modified at all, the result will be prepended with "$__".
+     *
+     * @param name the name to be transformed
+     * @return the unmodified string if it is legal, otherwise a legal-identifier version
+     */
+    public static String fixClassName(String name) {
+        if(name == null) {
+            return "$__null";
+        }
+        if(keywordSet.contains(name)) {
+            return "$__" + name;
+        }
+        StringBuffer sb = new StringBuffer();
+        int cplen = name.codePointCount(0, name.length());
+        if(cplen < 1) {
+            return "$__zerolen";
+        }
+        boolean modified = false;
+        int scp = name.codePointAt(0);
+        if(!Character.isJavaIdentifierStart(scp)) {
+            modified = true;
+            if(!Character.isJavaIdentifierPart(scp) || Character.isIdentifierIgnorable(scp)) {
+                sb.append("x");
+            } else {
+                sb.appendCodePoint(scp);
+            }
+        } else {
+            sb.appendCodePoint(scp);
+        }
+
+        for(int i = 1; i < cplen; i++) {
+            int cp = name.codePointAt(i);
+            if(!Character.isJavaIdentifierPart(cp) || Character.isIdentifierIgnorable(cp)) {
+                modified = true;
+                sb.append("x");
+            } else {
+                sb.appendCodePoint(cp);
+            }
+        }
+        if(modified) {
+            return "$__" + sb.toString();
+        } else {
+            return name;
+        }
+    }
+
+    public static void dump_ClassDesc(int indentlevel, classdesc cd, PrintStream ps, boolean fixname) throws IOException {
+        String classname = cd.name;
+        if(fixname) {
+            classname = fixClassName(classname);
+        }
         if(cd.annotations != null && cd.annotations.size() > 0) {
             ps.println(indent(indentlevel) + "// annotations: ");
             for(content c: cd.annotations) {
@@ -237,7 +318,7 @@ public class jdeserialize {
         }
         if(cd.classtype == classdesctype.NORMALCLASS) {
             if((cd.descflags & ObjectStreamConstants.SC_ENUM) != 0) {
-                ps.print(indent(indentlevel) + "enum " + cd.name + " {");
+                ps.print(indent(indentlevel) + "enum " + classname + " {");
                 boolean shouldindent = true;
                 int len = indent(indentlevel+1).length();
                 for(String econst: cd.enumconstants) {
@@ -261,7 +342,7 @@ public class jdeserialize {
             if(cd.isStaticMemberClass()) {
                 ps.print("static ");
             }
-            ps.print("class " + (cd.name.charAt(0) == '[' ? resolveJavaType(fieldtype.ARRAY, cd.name, false) : cd.name));
+            ps.print("class " + (classname.charAt(0) == '[' ? resolveJavaType(fieldtype.ARRAY, cd.name, false, fixname) : classname));
             if(cd.superclass != null) {
                 ps.print(" extends " + cd.superclass.name);
             }
@@ -285,7 +366,7 @@ public class jdeserialize {
                 ps.println(" " + f.name + ";");
             }
             for(classdesc icd: cd.innerclasses) {
-                dump_ClassDesc(indentlevel+1, icd, ps);
+                dump_ClassDesc(indentlevel+1, icd, ps, fixname);
             }
             ps.println(indent(indentlevel)+"}");
         } else if(cd.classtype == classdesctype.PROXYCLASS) {
@@ -617,26 +698,23 @@ public class jdeserialize {
         }
     }
 
-    public void run(InputStream is) throws IOException {
+    public void run(InputStream is, boolean shouldConnect) throws IOException {
         LoggerInputStream lis = null;
         DataInputStream dis = null;
         try {
             lis = new LoggerInputStream(is);
             dis = new DataInputStream(lis);
-            System.out.println("version 1: " + ObjectStreamConstants.PROTOCOL_VERSION_1);
-            System.out.println("version 2: " + ObjectStreamConstants.PROTOCOL_VERSION_2);
 
             short magic = dis.readShort();
             if(magic != ObjectStreamConstants.STREAM_MAGIC) {
-                throw new IOException("file magic mismatch!  expected " + ObjectStreamConstants.STREAM_MAGIC + ", got " + magic);
+                throw new ValidityException("file magic mismatch!  expected " + ObjectStreamConstants.STREAM_MAGIC + ", got " + magic);
             }
             short streamversion = dis.readShort();
             if(streamversion != ObjectStreamConstants.STREAM_VERSION) {
-                throw new IOException("file version mismatch!  expected " + ObjectStreamConstants.STREAM_VERSION + ", got " + streamversion);
+                throw new ValidityException("file version mismatch!  expected " + ObjectStreamConstants.STREAM_VERSION + ", got " + streamversion);
             }
-            handles = new HashMap<Integer,content>();
-            curhandle = ObjectStreamConstants.baseWireHandle;  // 0x7e0000
-            ArrayList<content> content = new ArrayList<content>();
+            reset();
+            content = new ArrayList<content>();
             while(true) {
                 byte tc;
                 try { 
@@ -655,40 +733,6 @@ public class jdeserialize {
                 }
                 content.add(c);
             }
-            debug("");
-            debug("XXX validating");
-            for(content c: handles.values()) {
-                c.validate();
-            }
-            connectMemberClasses();
-
-            debug("XXX validating");
-            for(content c: handles.values()) {
-                c.validate();
-            }
-            debug("XXX content:");
-            for(content c: content) {
-                debug("" + c);
-            }
-
-            debug("");
-            debug("XXXX classes:");
-            for(content c: handles.values()) {
-                if(c instanceof classdesc) {
-                    classdesc cl = (classdesc)c;
-                    if(!cl.isStaticMemberClass() && !cl.isInnerClass() && (!cl.isArrayClass() || cl.isArrayClass())) {
-                        dump_ClassDesc(0, cl, System.out);
-                        debug("");
-                    }
-                }
-            }
-            debug("XXXX instances:");
-            for(content c: handles.values()) {
-                if(c instanceof instance) {
-                    instance i = (instance)c;
-                    dump_Instance(0, i, System.out);
-                }
-            }
         } finally {
             if(dis != null) {
                 try {
@@ -701,7 +745,109 @@ public class jdeserialize {
                 } catch (Exception ignore) {}
             }
         }
+        for(content c: handles.values()) {
+            c.validate();
+        }
+        if(shouldConnect) {
+            connectMemberClasses();
+            for(content c: handles.values()) {
+                c.validate();
+            }
+        }
     }
+    public void dump(Getopt go) throws IOException {
+        if(go.hasOption("-blockdata") || go.hasOption("-blockdatamanifest")) {
+            List<String> bout = go.getArguments("-blockdata");
+            List<String> mout = go.getArguments("-blockdatamanifest");
+            FileOutputStream bos = null, mos = null;
+            PrintWriter pw = null;
+            try {
+                if(bout != null && bout.size() > 0) {
+                    bos = new FileOutputStream(bout.get(0));
+                }
+                if(mout != null && bout.size() > 0) {
+                    mos = new FileOutputStream(mout.get(0));
+                    pw = new PrintWriter(mos);
+                    pw.println("# Each line in this file that doesn't begin with a '#' contains the size of");
+                    pw.println("# an individual blockdata block written to the stream.");
+                }
+                for(content c: content) {
+                    System.out.println(c.toString());
+                    if(c instanceof blockdata) {
+                        blockdata bd = (blockdata)c;
+                        if(mos != null) {
+                            pw.println(bd.buf.length);
+                        }
+                        if(bos != null) {
+                            bos.write(bd.buf);
+                        }
+                    }
+                }
+            } finally {
+                if(bos != null) {
+                    try {
+                        bos.close();
+                    } catch (IOException ignore) { }
+                }
+                if(mos != null) {
+                    try {
+                        pw.close();
+                        mos.close();
+                    } catch (IOException ignore) { }
+                }
+            }
+        }
+        if(!go.hasOption("-nocontent")) {
+            System.out.println("//// BEGIN stream content output");
+            for(content c: content) {
+                System.out.println(c.toString());
+            }
+            System.out.println("//// END stream content output");
+            System.out.println("");
+        }
+
+        if(!go.hasOption("-noclasses")) {
+            boolean showarray = go.hasOption("-showarrays");
+            List<String> fpat = go.getArguments("-filter");
+            System.out.println("//// BEGIN class declarations"
+                    + (showarray? "" : " (excluding array classes)")
+                    + ((fpat != null && fpat.size() > 0) 
+                        ? " (exclusion filter " + fpat.get(0) + ")"
+                        : ""));
+            for(content c: handles.values()) {
+                if(c instanceof classdesc) {
+                    classdesc cl = (classdesc)c;
+                    if(showarray == false && cl.isArrayClass()) {
+                        continue;
+                    }
+                    // Member classes will be displayed as part of their enclosing
+                    // classes.
+                    if(cl.isStaticMemberClass() || cl.isInnerClass()) {
+                        continue;
+                    }
+                    if(fpat != null && fpat.size() > 0 && cl.name.matches(fpat.get(0))) {
+                        continue;
+                    }
+                    dump_ClassDesc(0, cl, System.out, go.hasOption("-fixnames"));
+                    System.out.println("");
+                }
+            }
+            System.out.println("//// END class declarations");
+            System.out.println("");
+        }
+        if(!go.hasOption("-noinstances")) {
+            System.out.println("//// BEGIN instance dump");
+            for(content c: handles.values()) {
+                if(c instanceof instance) {
+                    instance i = (instance)c;
+                    dump_Instance(0, i, System.out);
+                }
+            }
+            System.out.println("//// END instance dump");
+            System.out.println("");
+        }
+    }
+
 
     /**
      * Connects member classes according to the rules specified by the JDK 1.1 Inner
@@ -863,8 +1009,10 @@ public class jdeserialize {
     public static void debugerr(String message) {
         System.err.println(message);
     }
-    public static void debug(String message) {
-        System.out.println(message);
+    public void debug(String message) {
+        if(debugEnabled) {
+            System.out.println(message);
+        }
     }
 
     public static void main(String[] args) {
@@ -872,11 +1020,12 @@ public class jdeserialize {
         Getopt go = new Getopt();
         go.addOption("-help", 0, "Show this list.");
         go.addOption("-debug", 0, "Write debug info generated during parsing to stdout.");
-        go.addOption("-javalang", 0, "Filter out java.lang.* classes from class output.");
-        go.addOption("-nocontent", 0, "Don't output textual descriptions of instances.");
-        go.addOption("-noarray", 0, "Don't filter array classes from class declarations.");
-        go.addOption("-noinner", 0, "Don't attempt connect inner classes to their enclosing classes.");
-        go.addOption("-filternames", 0, "In class names, replace illegal Java identifier characters with legal ones.");
+        go.addOption("-filter", 1, "Exclude classes that match the given String.matches() regex from class output.");
+        go.addOption("-nocontent", 0, "Don't output descriptions of the content in the stream.");
+        go.addOption("-noinstances", 0, "Don't output descriptions of every instance.");
+        go.addOption("-showarrays", 0, "Show array class declarations (e.g. int[]).");
+        go.addOption("-noconnect", 0, "Don't attempt connect inner classes to their enclosing classes.");
+        go.addOption("-fixnames", 0, "In class names, replace illegal Java identifier characters with legal ones.");
         go.addOption("-noclasses", 0, "Don't output class declarations.");
         go.addOption("-blockdata", 1, "Write raw blockdata out to the specified file.");
         go.addOption("-blockdatamanifest", 1, "Write blockdata manifest out to the specified file.");
@@ -901,7 +1050,13 @@ public class jdeserialize {
             try {
                 fis = new FileInputStream(filename);
                 jdeserialize jd = new jdeserialize(filename);
-                jd.run(fis);
+                if(go.hasOption("-debug")) {
+                    jd.debugEnabled = true;
+                } else {
+                    jd.debugEnabled = false;
+                }
+                jd.run(fis, !go.hasOption("-noconnect"));
+                jd.dump(go);
             } catch(EOFException eoe) {
                 debugerr("EOF error while attempting to decode file " + filename + ": " + eoe.getMessage());
                 eoe.printStackTrace();
