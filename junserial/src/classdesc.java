@@ -3,16 +3,20 @@ import java.io.*;
 import java.util.*;
 
 /**
+ * <p>
  * Represents the entire serialized prototype of the class, including all fields,
  * inner classes, class annotations, and inheritance hierarchy.  This includes proxy class
  * descriptions.
+ * </p>
  *
+ * <p>
  * Generally, this class is used to represent the type of an instance written to an
  * ObjectOutputStream with its writeObject() method, or of a related array or field type.
  * However, there's a notable exception: when instances of type java.io.ObjectStreamClass
  * are written with writeObject(), only their class description is written (cf. Object
  * Serialization Specification, 4.3).  They will be represented with an instance of
  * classdesc as well.
+ * </p>
  */
 public class classdesc extends contentbase {
     /**
@@ -48,7 +52,7 @@ public class classdesc extends contentbase {
     
     /**
      * List of annotation objects; these are *not* Java annotations, but data written by
-     * the annotateClass(Class<?>) and annotateProxyClass(Class<?>) methods of an
+     * the <pre>annotateClass(Class<?>)<pre> and <pre>annotateProxyClass(Class<?>)</pre> methods of an
      * ObjectOutputStream.  
      */
     public List<content> annotations;
@@ -108,12 +112,16 @@ public class classdesc extends contentbase {
 
     private boolean isStaticMemberClass = false;
     /**
+     * <p>
      * True if this class has been determined to be a static member class; this
      * determination is generally made by connectMemberClasses().
+     * </p>
      *
+     * <p>
      * Note that in some cases, static member classes' descriptions will be serialized
      * even though their enclosing class is not.  In these cases, this may return false.
      * See connectMemberClasses() for details.
+     * </p>
      *
      * @return true if this is a static member class
      */
@@ -182,7 +190,7 @@ public class classdesc extends contentbase {
      * described by the Object Stream Serialization Protocol.  This is the order in which
      * fields are read from the stream.
      * 
-     * @return a list of all serialized superclasses
+     * @param classes a list to be filled in with the hierarchy
      */
     public void getHierarchy(ArrayList<classdesc> classes) {
         if(superclass != null) {

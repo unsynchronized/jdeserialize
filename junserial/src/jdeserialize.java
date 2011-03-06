@@ -6,55 +6,55 @@ import java.util.regex.*;
 
 /**
  * The main user-facing class for the jdeserialize library.  Also the implementation of
- * the command-line tool.
- *
- * Library:
- *
+ * the command-line tool.<br/>
+ * <br/>
+ * Library:<br/>
+ * <br/>
  * The jdeserialize class parses the stream (method run()).  From there, call the
  * getContent() method to get an itemized list of all items written to the stream, 
  * or getHandleMaps() to get a list of all handle->content maps generated during parsing.
  * The objects are generally instances that implement the interface "content"; see the
  * documentation of various implementors to get more information about the inner
- * representations.
- *
- * To enable debugging on stdout, use the enableDebug() or disableDebug() options.  
- *
- *
- * Command-line tool:  
- *
+ * representations.<br/>
+ * <br/>
+ * To enable debugging on stdout, use the enableDebug() or disableDebug() options.   <br/> 
+ * <br/>
+ * <br/>
+ * Command-line tool:   <br/>
+ * <br/>
  * The tool reads in a set of files and generates configurable output on stdout.  The
  * primary output consists of three separate stages.  The first stage is  a textual 
  * description of every piece of content in the stream, in the order it was written.
  * There is generally a one-to-one mapping between ObjectOutputStream.writeXXX() calls and
  * items printed in the first stage.  The first stage may be suppressed with the
- * -nocontent command-line option.
- *
+ * -nocontent command-line option. <br/>
+ * <br/>
  * The second stage is a list of every class declaration serialized in the file.  These
  * are formatted as normal Java language class declarations.  Several options are
  * available to govern this stage, including -filter, -showarrays, -noclasses, and
- * -fixnames.
- *
+ * -fixnames. <br/>
+ * <br/>
  * The third stage is a dump of every instance embedded inside the stream, including
  * textual descriptions of field values.  This is useful for casual viewing of class data. 
- * To suppress this stage, use -noinstances.
- *
+ * To suppress this stage, use -noinstances. <br/>
+ * <br/>
  * You can also get debugging information generated during the parse phase by supplying
  * -debug.
- *
+ * <br/>
  * The data from block data objects can be extracted with the -blockdata <file> option.
  * Additionally, a manifest describing the size of each individual block can be generated
  * with the -blockdatamanifest <file> option.
- *
- * References:
+ * <br/>
+ * References: <br/>
  *     - Java Object Serialization Specification ch. 6 (Object Serialization Stream
- *       Protocol):
- *       http://download.oracle.com/javase/6/docs/platform/serialization/spec/protocol.html
+ *       Protocol): <br/>
+ *       http://download.oracle.com/javase/6/docs/platform/serialization/spec/protocol.html <br/>
  *     - "Modified UTF-8 Strings" within the JNI specification: 
- *       http://download.oracle.com/javase/1.5.0/docs/guide/jni/spec/types.html#wp16542
+ *       http://download.oracle.com/javase/1.5.0/docs/guide/jni/spec/types.html#wp16542 <br/>
  *     - "Inner Classes Specification" within the JDK 1.1.8 docs:
- *       http://java.sun.com/products/archive/jdk/1.1/
+ *       http://java.sun.com/products/archive/jdk/1.1/ <br/>
  *     - "Java Language Specification", third edition, particularly section 3:
- *       http://java.sun.com/docs/books/jls/third_edition/html/j3TOC.html
+ *       http://java.sun.com/docs/books/jls/third_edition/html/j3TOC.html <br/>
  *
  * @see content
  */
@@ -88,16 +88,22 @@ public class jdeserialize {
     }
 
     /**
+     * <p>
      * Retrieves the list of content objects that were written to the stream.  Each item
      * generally corresponds to an invocation of an ObjectOutputStream writeXXX() method.
      * A notable exception is the class exceptionstate, which represents an embedded
      * exception that was caught during serialization.
+     * </p>
      *
+     * <p>
      * See the various implementors of content to get information about what data is
      * available.  
+     * </p>
      *
+     * <p>
      * Entries in the list may be null, because it's perfectly legitimate to write a null
      * reference to the stream.  
+     * </p>
      *
      * @return a list of content objects
      * @see content
@@ -108,14 +114,20 @@ public class jdeserialize {
     }
 
     /**
+     * <p>
      * Return a list of Maps containing every object with a handle.  The keys are integers
      * -- the handles themselves -- and the values are instances of type content.
+     * </p>
      *
+     * <p>
      * Although there is only one map active at a given point, a stream may have multiple
      * logical maps: when a reset happens (indicated by TC_RESET), the current map is
      * cleared.  
+     * </p>
      *
+     * <p>
      * See the spec for details on handles.
+     * </p>
      * @return a list of <Integer,content> maps
      */
     public List<Map<Integer,content>> getHandleMaps() {
@@ -710,14 +722,18 @@ public class jdeserialize {
     }
 
     /**
+     * <p>
      * Read the next object corresponding to the spec grammar rule "content", and return
      * an object of type content.
+     * </p>
      *
-     * By and large, there is a 1:1 mapping of content items and returned instances.  The
+     * <p>
+     * Usually, there is a 1:1 mapping of content items and returned instances.  The
      * one case where this isn't true is when an exception is embedded inside another
      * object.  When this is encountered, only the serialized exception object is
      * returned; it's up to the caller to backtrack in order to gather any data from the
      * object that was being serialized when the exception was thrown.
+     * </p>
      *
      * @param tc the last byte read from the stream; it must be one of the TC_* values
      * within ObjectStreamConstants.*
@@ -765,18 +781,24 @@ public class jdeserialize {
     }
 
     /**
+     * <p>
      * Reads in an entire ObjectOutputStream output on the given stream, filing 
      * this object's content and handle maps with data about the objects in the stream.  
+     * </p>
      *
+     * <p>
      * If shouldConnect is true, then jdeserialize will attempt to identify member classes
      * by their names according to the details laid out in the Inner Classes
      * Specification.  If it finds one, it will set the classdesc's flag indicating that
-     * it is an inner class, and it will create a reference in its enclosing class.
+     * it is an member class, and it will create a reference in its enclosing class.
+     * </p>
      *
      * @param is an open InputStream on a serialized stream of data
      * @param shouldConnect true if jdeserialize should attempt to identify and connect
      * member classes with their enclosing classes
-     * @see connectMemberClasses
+     * 
+     * Also see the <pre>connectMemberClasses</pre> method for more information on the 
+     * member-class-detection algorithm.
      */
     public void run(InputStream is, boolean shouldConnect) throws IOException {
         LoggerInputStream lis = null;
@@ -935,9 +957,12 @@ public class jdeserialize {
 
 
     /**
+     * <p>
      * Connects member classes according to the rules specified by the JDK 1.1 Inner
      * Classes Specification.  
+     * </p>
      *
+     * <pre>
      * Inner classes:
      * for each class C containing an object reference member R named this$N, do:
      *     if the name of C matches the pattern O$I
@@ -951,17 +976,22 @@ public class jdeserialize {
      * where O is the name of a class in the same package
      * AND C is not an inner class according to the above algorithm:
      *     consider C to be an inner class of O named I
+     * </pre>
      *
+     * <p>
      * This functions fills in the isInnerClass value in classdesc, the
      * isInnerClassReference value in field, the isLocalInnerClass value in 
      * classdesc, and the isStaticMemberClass value in classdesc where necessary.
+     * </p>
      *
+     * <p>
      * A word on static classes: serializing a static member class S doesn't inherently
      * require serialization of its parent class P.  Unlike inner classes, S doesn't
      * retain an instance of P, and therefore P's class description doesn't need to be
      * written.  In these cases, if parent classes can be found, their static member
      * classes will be connected; but if they can't be found, the names will not be
      * changed and no ValidityException will be thrown.
+     * </p>
      *
      * @throws ValidityException if the found values don't correspond to spec
      */
@@ -1109,7 +1139,7 @@ public class jdeserialize {
         go.addOption("-nocontent", 0, "Don't output descriptions of the content in the stream.");
         go.addOption("-noinstances", 0, "Don't output descriptions of every instance.");
         go.addOption("-showarrays", 0, "Show array class declarations (e.g. int[]).");
-        go.addOption("-noconnect", 0, "Don't attempt connect inner classes to their enclosing classes.");
+        go.addOption("-noconnect", 0, "Don't attempt to connect member classes to their enclosing classes.");
         go.addOption("-fixnames", 0, "In class names, replace illegal Java identifier characters with legal ones.");
         go.addOption("-noclasses", 0, "Don't output class declarations.");
         go.addOption("-blockdata", 1, "Write raw blockdata out to the specified file.");

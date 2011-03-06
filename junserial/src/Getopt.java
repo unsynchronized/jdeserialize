@@ -43,7 +43,7 @@ public class Getopt {
      * @param options Map of options to parse.  The key should be an option string (including
      * any initial dashes), and the value should be an Integer representing the number of
      * arguments to parse following the option.
-     * @param options Map of option descriptions.
+     * @param descriptions Map of option descriptions.
      */
     public Getopt(Map<String, Integer> options, Map<String, String> descriptions) {
         this.options = options;
@@ -92,7 +92,7 @@ public class Getopt {
 
     /**
      * Do the parsing/validation.
-     * @apram args arguments to parse
+     * @param args arguments to parse
      * @throws OptionParseException if a parse error occurs (the exception message will
      * have details)
      */

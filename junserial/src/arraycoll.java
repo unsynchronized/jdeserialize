@@ -3,11 +3,11 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Typed collection used for storing the values of a serialized array.  
+ * <p>Typed collection used for storing the values of a serialized array.  </p>
  *
- * Primitive types are stored using their corresponding objects; for instance, an int is
+ * <p>Primitive types are stored using their corresponding objects; for instance, an int is
  * stored as an Integer.  To determine whether or not this is an array of ints or of
- * Integer instances, check the name in the arrayobj's class description.
+ * Integer instances, check the name in the arrayobj's class description.</p>
  */
 public class arraycoll extends ArrayList<Object> {
     public static final long serialVersionUID = 2277356908919248L;

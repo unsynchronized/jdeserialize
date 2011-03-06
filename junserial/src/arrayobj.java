@@ -3,11 +3,11 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Represents an array instance, including the values the comprise the array.  
+ * <p>Represents an array instance, including the values the comprise the array.  </p>
  *
- * Note that in arrays of primitives, the classdesc will be named "[x", where x is the
+ * <p>Note that in arrays of primitives, the classdesc will be named "[x", where x is the
  * field type code representing the primitive type.  See jdeserialize.resolveJavaType()
- * for an example of analysis/generation of human-readable names from these class names.
+ * for an example of analysis/generation of human-readable names from these class names.</p>
  */
 public class arrayobj extends contentbase {
     /**

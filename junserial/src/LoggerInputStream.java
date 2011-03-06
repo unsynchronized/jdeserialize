@@ -4,14 +4,18 @@ import java.io.*;
 import java.util.*;
 
 /**
+ * <p>
  * An InputStream designed to record data passing through the stream after a call to
  * record() is made.  After record() is called, the results from every read will 
  * be stored in an * internal buffer.  The contents of the buffer can be 
  * retrieved by getRecordedData(); to stop recording and clear the internal 
  * buffer, call stopRecording().
+ * </p>
  *
- * Note: calls to mark() and reset() are merely passed through to the inner stream; if
+ * <p>
+ * <b>Note</b>: calls to mark() and reset() are merely passed through to the inner stream; if
  * recording is active, the buffer won't be backtracked by reset().
+ * </p>
  */
 public class LoggerInputStream extends InputStream {
     private InputStream innerStream = null;

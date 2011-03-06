@@ -3,9 +3,11 @@ import java.io.*;
 import java.util.*;
 
 /**
+ * <p>
  * Represents an enum instance.  As noted in the serialization spec, this consists of
  * merely the class description (represented by a classdesc) and the string corresponding
  * to the enum's value.  No other fields are ever serialized.
+ * </p>
  */
 public class enumobj extends contentbase {
     /**

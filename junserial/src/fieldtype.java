@@ -3,10 +3,14 @@ import java.io.*;
 import java.util.*;
 
 /**
+ * <p>
  * Enum class that describes the type of a field encoded inside a classdesc description.
+ * </p>
  *
+ * <p>
  * This stores both information on the type (reference/array vs. primitive) and, in cases
  * of reference or array types, the name of the class being referred to.  
+ * </p>
  */
 public enum fieldtype {
     BYTE ('B', "byte"),
