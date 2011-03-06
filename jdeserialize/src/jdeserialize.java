@@ -1158,6 +1158,8 @@ public class jdeserialize {
         List<String> fargs = go.getOtherArguments();
         if(fargs.size() < 1) {
             debugerr("args: [options] file1 [file2 .. fileN]");
+            System.err.println("");
+            System.err.println(go.getDescriptionString());
             System.exit(1);
         }
         for(String filename: fargs) {
