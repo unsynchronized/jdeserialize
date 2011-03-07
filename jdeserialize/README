@@ -6,4 +6,4 @@ It is aimed at reverse engineers working with serialized streams of unknown prov
 
 All public classes have workable javadoc documentation.
 
-This code is in the public domain.
+This code is in the public domain.  It was written by Brandon Creighton <cstone@pobox.com>, and currently lives at https://code.google.com/p/jdeserialize/.
