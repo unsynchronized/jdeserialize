@@ -32,4 +32,8 @@ public class instance extends contentbase {
         //sb.append("// [instance " + jdeserialize.hex(handle) + ": " + jdeserialize.hex(classdesc.handle) + "/" + classdesc.name).append("]");
         return sb.toString();
     }
+    /**
+     * Object annotation data.
+     */
+    public Map<classdesc, List<content>> annotations;
 }

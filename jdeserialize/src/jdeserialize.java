@@ -199,6 +199,7 @@ public class jdeserialize {
                 }
             }
         }
+        inst.annotations = ann;
         inst.fielddata = alldata;
     }
 
@@ -301,6 +302,15 @@ public class jdeserialize {
     public static void dump_Instance(int indentlevel, instance inst, PrintStream ps) {
         StringBuffer sb = new StringBuffer();
         sb.append("[instance " + hex(inst.handle) + ": " + hex(inst.classdesc.handle) + "/" + inst.classdesc.name);
+        if(inst.annotations != null && inst.annotations.size() > 0) {
+            sb.append(linesep).append("  object annotations:").append(linesep);
+            for(classdesc cd: inst.annotations.keySet()) {
+                sb.append("    ").append(cd.name).append(linesep);
+                for(content c: inst.annotations.get(cd)) {
+                    sb.append("        ").append(c.toString()).append(linesep);
+                }
+            }
+        }
         if(inst.fielddata != null && inst.fielddata.size() > 0) {
             sb.append(linesep).append("  field data:").append(linesep);
             for(classdesc cd: inst.fielddata.keySet()) {
@@ -830,6 +840,7 @@ public class jdeserialize {
                     break;
                 }
                 content c = read_Content(tc, dis, true);
+                System.out.println("read: " + c.toString());
                 if(c != null && c.isExceptionObject()) {
                     c = new exceptionstate(c, lis.getRecordedData());
                 }
