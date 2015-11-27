@@ -42,7 +42,7 @@ public class arraycoll extends ArrayList<Object> {
             } else {
                 sb.append(", ");
             }
-            sb.append(o.toString());
+            sb.append(o == null ? "null" : o.toString());
         }
         return sb.toString();
     }
